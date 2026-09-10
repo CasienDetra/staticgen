@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 190" role="img"
+     aria-label="Diagram: Load, Assemble, Render, Emit and Publish stages of the build pipeline">
+  <style>
+    .box { fill: #f5f7fb; stroke: #2f5bd7; stroke-width: 1.5; rx: 8; }
+    .lbl { font: 600 15px ui-sans-serif, system-ui, sans-serif; fill: #16181d; text-anchor: middle; }
+    .sub { font: 400 11.5px ui-sans-serif, system-ui, sans-serif; fill: #5c6270; text-anchor: middle; }
+    .arrow { stroke: #2f5bd7; stroke-width: 1.75; fill: none; marker-end: url(#head); }
+  </style>
+  <defs>
+    <marker id="head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2f5bd7"/>
+    </marker>
+  </defs>
+
+  <g>
+    <rect class="box" x="8"   y="45" width="120" height="70"/>
+    <text class="lbl" x="68"  y="76">Load</text>
+    <text class="sub" x="68"  y="96">md &#8594; pages</text>
+
+    <rect class="box" x="152" y="45" width="120" height="70"/>
+    <text class="lbl" x="212" y="76">Assemble</text>
+    <text class="sub" x="212" y="96">sections, tags</text>
+
+    <rect class="box" x="296" y="45" width="120" height="70"/>
+    <text class="lbl" x="356" y="76">Render</text>
+    <text class="sub" x="356" y="96">templates</text>
+
+    <rect class="box" x="440" y="45" width="120" height="70"/>
+    <text class="lbl" x="500" y="76">Emit</text>
+    <text class="sub" x="500" y="96">feed, sitemap</text>
+
+    <rect class="box" x="584" y="45" width="120" height="70"/>
+    <text class="lbl" x="644" y="76">Publish</text>
+    <text class="sub" x="644" y="96">atomic writes</text>
+  </g>
+
+  <path class="arrow" d="M128,80 H152"/>
+  <path class="arrow" d="M272,80 H296"/>
+  <path class="arrow" d="M416,80 H440"/>
+  <path class="arrow" d="M560,80 H584"/>
+
+  <text class="sub" x="360" y="152">each stage is an interface owned by the pipeline</text>
+  <text class="sub" x="360" y="28">content/ &#8594; public/</text>
+</svg>

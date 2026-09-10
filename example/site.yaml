@@ -1,0 +1,65 @@
+title: Field Notes
+description: A small blog about Go, tooling and building static sites.
+base_url: https://example.com
+language: en-us
+copyright: "Released under the MIT licence."
+
+author:
+  name: Casien
+  email: hello@example.com
+  url: https://example.com/about/
+
+dirs:
+  content: content
+  static: static
+  templates: templates
+  output: public
+
+build:
+  drafts: false
+  future: false
+  minify: false
+  pretty_urls: true
+  clean_output: true
+  summary_length: 55
+  toc: true
+
+markup:
+  # Raw HTML in Markdown stays escaped unless this is true.
+  unsafe: false
+  typographer: true
+  highlight:
+    enabled: true
+    style: github
+    line_numbers: false
+    guess_language: true
+
+feeds:
+  rss: true
+  rss_limit: 20
+  sitemap: true
+  search: true
+
+serve:
+  host: 127.0.0.1
+  port: 1313
+  live_reload: true
+  debounce_ms: 100
+
+menu:
+  - name: Home
+    url: /
+    weight: 1
+  - name: Blog
+    url: /blog/
+    weight: 2
+  - name: About
+    url: /about/
+    weight: 3
+  - name: Archive
+    url: /archive/
+    weight: 4
+
+params:
+  repository: https://github.com/example/field-notes
+  since: 2026
