@@ -1,0 +1,6 @@
+<nav class="toc" aria-label="Table of contents">
+  <h2 class="toc-title">Contents</h2>
+  <ul>
+{{ range .Page.TOC }}    <li class="toc-level-{{ .Level }}"><a href="#{{ .ID }}">{{ .Text }}</a></li>
+{{ end }}  </ul>
+</nav>

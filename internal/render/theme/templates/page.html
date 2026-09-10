@@ -1,0 +1,26 @@
+{{ define "main" }}
+<article class="post">
+  <header class="post-header">
+    <h1>{{ .Page.Meta.Title }}</h1>
+    <div class="post-meta">
+      {{ if not .Page.Date.IsZero }}<time datetime="{{ dateISO .Page.Date }}">{{ dateFormat "January 2, 2006" .Page.Date }}</time>{{ end }}
+      {{ if gt .Page.ReadingMinutes 0 }}<span class="dot">&middot;</span><span>{{ .Page.ReadingMinutes }} min read</span>{{ end }}
+      {{ if gt .Page.WordCount 0 }}<span class="dot">&middot;</span><span>{{ .Page.WordCount }} words</span>{{ end }}
+      {{ with .Page.Section }}<span class="dot">&middot;</span><a class="section-link" href="/{{ . }}/">{{ . }}</a>{{ end }}
+    </div>
+    {{ with .Page.Meta.Description }}<p class="lede">{{ . }}</p>{{ end }}
+  </header>
+
+  {{ if and .Config.Build.TOC .Page.HasTOC }}{{ template "partials/toc.html" . }}{{ end }}
+
+  <div class="prose">{{ .Page.BodyHTML }}</div>
+
+  {{ if .Page.Meta.Tags }}<footer class="post-tags">
+    <ul class="tag-list">
+    {{ range .Page.Meta.Tags }}<li><a href="{{ tagURL . }}">{{ . }}</a></li>
+    {{ end }}</ul>
+  </footer>{{ end }}
+
+  {{ template "partials/pager.html" . }}
+</article>
+{{ end }}

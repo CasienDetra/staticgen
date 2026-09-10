@@ -1,0 +1,13 @@
+<footer class="site-footer">
+  <div class="container footer-inner">
+    <p class="copyright">
+      {{ with .Config.Copyright }}{{ . }}{{ else }}&copy; {{ dateFormat "2006" .Site.BuiltAt }} {{ .Config.Title }}{{ end }}
+    </p>
+    <p class="footer-links">
+      {{ if .Config.Feeds.RSS }}<a href="{{ absURL "/feed.xml" }}">RSS</a>{{ end }}
+      {{ if .Config.Feeds.Sitemap }}<a href="{{ absURL "/sitemap.xml" }}">Sitemap</a>{{ end }}
+      <a href="{{ relURL "/archive/" }}">Archive</a>
+      <span class="muted">{{ .Site.Stats.Regular }} {{ pluralize .Site.Stats.Regular "post" "posts" }}</span>
+    </p>
+  </div>
+</footer>

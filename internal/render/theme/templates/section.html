@@ -1,0 +1,10 @@
+{{ define "main" }}
+<header class="page-header">
+  <h1>{{ .Page.Meta.Title }}</h1>
+  {{ with .Page.Meta.Description }}<p class="lede">{{ . }}</p>{{ end }}
+</header>
+
+{{ with .Page.BodyHTML }}<div class="prose">{{ . }}</div>{{ end }}
+
+{{ template "partials/postlist.html" . }}
+{{ end }}

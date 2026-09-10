@@ -1,0 +1,18 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ .DocumentTitle }}</title>
+<meta name="generator" content="staticgen">
+{{ with .Page.Meta.Description }}<meta name="description" content="{{ . }}">
+{{ end }}{{ with .Config.Author.Name }}<meta name="author" content="{{ . }}">
+{{ end }}<link rel="canonical" href="{{ absURL .Page.URL }}">
+{{ if .Config.Feeds.RSS }}<link rel="alternate" type="application/rss+xml" title="{{ .Config.Title }}" href="{{ absURL "/feed.xml" }}">
+{{ end }}<link rel="stylesheet" href="{{ asset "css/style.css" }}">
+{{ if .Config.Markup.Highlight.Enabled }}<link rel="stylesheet" href="{{ asset "css/chroma.css" }}">
+{{ end }}<meta property="og:site_name" content="{{ .Config.Title }}">
+<meta property="og:type" content="{{ if .Page.Kind.IsListing }}website{{ else }}article{{ end }}">
+<meta property="og:title" content="{{ .Page.Meta.Title }}">
+<meta property="og:url" content="{{ absURL .Page.URL }}">
+{{ with .Page.Meta.Description }}<meta property="og:description" content="{{ . }}">
+{{ end }}{{ if not .Page.Date.IsZero }}<meta property="article:published_time" content="{{ dateISO .Page.Date }}">
+{{ end }}{{ range .Page.Meta.Tags }}<meta property="article:tag" content="{{ . }}">
+{{ end }}

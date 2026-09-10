@@ -1,0 +1,15 @@
+{{/* Injected only by `staticgen serve`. Never present in a published build. */}}
+<script>
+(function () {
+  var source = new EventSource("/__livereload");
+  source.onmessage = function (event) {
+    if (event.data === "reload") {
+      window.location.reload();
+    }
+  };
+  source.onerror = function () {
+    // The server went away; stop retrying so the console stays quiet.
+    source.close();
+  };
+})();
+</script>

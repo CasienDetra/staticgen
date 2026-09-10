@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="{{ .Config.Language }}">
+<head>
+{{ template "partials/head.html" . }}
+</head>
+<body class="kind-{{ .Page.Kind }}">
+<a class="skip-link" href="#main">Skip to content</a>
+{{ template "partials/header.html" . }}
+
+<main id="main" class="container">
+{{ template "main" . }}
+</main>
+
+{{ template "partials/footer.html" . }}
+{{ if .LiveReload }}{{ template "partials/livereload.html" . }}{{ end }}
+</body>
+</html>

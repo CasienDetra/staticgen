@@ -1,0 +1,18 @@
+<header class="site-header">
+  <div class="container header-inner">
+    <a class="site-title" href="{{ relURL "/" }}">{{ .Config.Title }}</a>
+
+    <nav class="site-nav" aria-label="Main navigation">
+      {{ range .Nav }}<a href="{{ .URL }}"{{ if .Active }} class="active" aria-current="page"{{ end }}>{{ .Name }}</a>
+      {{ end }}
+    </nav>
+
+    {{ if .Config.Feeds.Search }}<div class="site-search">
+      <input type="search" id="site-search-input" placeholder="Search…" autocomplete="off"
+             aria-label="Search this site" data-index="{{ relURL "/search.json" }}">
+      <div class="search-results" id="site-search-results" hidden></div>
+    </div>
+    <script src="{{ asset "js/search.js" }}" defer></script>
+    {{ end }}
+  </div>
+</header>

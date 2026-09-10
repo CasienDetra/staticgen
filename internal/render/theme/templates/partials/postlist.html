@@ -1,0 +1,17 @@
+{{ $pages := .Page.Pages }}
+{{ if $pages }}
+<ul class="post-list">
+{{ range $pages }}  <li class="post-item">
+    <h3 class="post-item-title"><a href="{{ .URL }}">{{ .Meta.Title }}</a></h3>
+    <div class="post-meta">
+      {{ if not .Date.IsZero }}<time datetime="{{ dateISO .Date }}">{{ dateFormat "Jan 2, 2006" .Date }}</time>{{ end }}
+      {{ if gt .ReadingMinutes 0 }}<span class="dot">&middot;</span><span>{{ .ReadingMinutes }} min read</span>{{ end }}
+      {{ with .Section }}<span class="dot">&middot;</span><a class="section-link" href="/{{ . }}/">{{ . }}</a>{{ end }}
+    </div>
+    {{ with .SummaryHTML }}<div class="post-summary">{{ . }}</div>{{ end }}
+    {{ if .Meta.Tags }}<ul class="tag-list">{{ range .Meta.Tags }}<li><a href="{{ tagURL . }}">{{ . }}</a></li>{{ end }}</ul>{{ end }}
+  </li>
+{{ end }}</ul>
+{{ else }}
+<p class="empty">Nothing published here yet.</p>
+{{ end }}

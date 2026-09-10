@@ -1,0 +1,21 @@
+{{ define "main" }}
+<header class="page-header">
+  <h1>{{ .Page.Meta.Title }}</h1>
+  <p class="lede">Every post, newest first.</p>
+</header>
+
+{{ if .Site.Archive }}
+{{ range .Site.Archive }}<section class="archive-year">
+  <h2 class="archive-heading">{{ .Year }}</h2>
+  <ul class="archive-list">
+  {{ range .Pages }}<li>
+      <time datetime="{{ dateISO .Date }}">{{ dateFormat "Jan 02" .Date }}</time>
+      <a href="{{ .URL }}">{{ .Meta.Title }}</a>
+    </li>
+  {{ end }}</ul>
+</section>
+{{ end }}
+{{ else }}
+<p class="empty">Nothing to archive yet.</p>
+{{ end }}
+{{ end }}

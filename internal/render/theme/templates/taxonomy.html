@@ -1,0 +1,23 @@
+{{ define "main" }}
+<header class="page-header">
+  <h1>{{ .Page.Meta.Title }}</h1>
+  {{ with .Page.Meta.Description }}<p class="lede">{{ . }}</p>{{ end }}
+</header>
+
+{{ $terms := .Site.Taxonomy.AllTerms }}
+{{ if hasPrefix .Page.URL "/tags/" }}{{ $terms = .Site.Taxonomy.Tags }}{{ end }}
+{{ if hasPrefix .Page.URL "/categories/" }}{{ $terms = .Site.Taxonomy.Categories }}{{ end }}
+
+{{ if $terms }}
+<ul class="term-list">
+{{ range $terms }}  <li>
+    <a class="term" href="{{ .URL }}">
+      <span class="term-name">{{ .Name }}</span>
+      <span class="term-count">{{ .Count }}</span>
+    </a>
+  </li>
+{{ end }}</ul>
+{{ else }}
+<p class="empty">No terms yet.</p>
+{{ end }}
+{{ end }}

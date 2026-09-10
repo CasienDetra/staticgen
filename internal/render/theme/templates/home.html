@@ -1,0 +1,20 @@
+{{ define "main" }}
+<section class="hero">
+  <h1>{{ .Config.Title }}</h1>
+  {{ with .Config.Description }}<p class="lede">{{ . }}</p>{{ end }}
+</section>
+
+{{ with .Page.BodyHTML }}<div class="prose home-body">{{ . }}</div>{{ end }}
+
+{{ if .Page.Pages }}<section class="recent">
+  <h2 class="section-heading">Recent posts</h2>
+  {{ template "partials/postlist.html" . }}
+</section>{{ end }}
+
+{{ if .Site.Taxonomy.Tags }}<section class="home-tags">
+  <h2 class="section-heading">Browse by tag</h2>
+  <ul class="tag-list">
+  {{ range .Site.Taxonomy.Tags }}<li><a href="{{ .URL }}">{{ .Name }}</a></li>
+  {{ end }}</ul>
+</section>{{ end }}
+{{ end }}

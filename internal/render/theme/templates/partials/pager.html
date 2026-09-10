@@ -1,0 +1,12 @@
+{{ if or .Page.Prev .Page.Next }}
+<nav class="pager" aria-label="Adjacent posts">
+  {{ with .Page.Prev }}<a class="pager-link pager-prev" href="{{ .URL }}" rel="prev">
+    <span class="pager-label">Older</span>
+    <span class="pager-title">{{ .Meta.Title }}</span>
+  </a>{{ else }}<span class="pager-link"></span>{{ end }}
+  {{ with .Page.Next }}<a class="pager-link pager-next" href="{{ .URL }}" rel="next">
+    <span class="pager-label">Newer</span>
+    <span class="pager-title">{{ .Meta.Title }}</span>
+  </a>{{ end }}
+</nav>
+{{ end }}
