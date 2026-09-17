@@ -377,16 +377,22 @@ func (e *Engine) AssetURL(asset string) string {
 
 func documentTitle(p *content.Page, cfg *config.Site) string {
 	title := strings.TrimSpace(p.Meta.Title)
-	if title == "" || title == cfg.Title || p.Kind == content.KindHome {
-		if cfg.Title == "" {
-			return title
+	suffixSite := title != "" && title != cfg.Title && p.Kind != content.KindHome
+	if !suffixSite && cfg.Title != "" {
+		title = cfg.Title
+	}
+	if p.Pagination != nil && p.Pagination.Number > 1 {
+		pageTitle := fmt.Sprintf("Page %d", p.Pagination.Number)
+		if title == "" {
+			title = pageTitle
+		} else {
+			title += " · " + pageTitle
 		}
-		return cfg.Title
 	}
-	if cfg.Title == "" {
-		return title
+	if suffixSite && cfg.Title != "" {
+		return title + " · " + cfg.Title
 	}
-	return title + " · " + cfg.Title
+	return title
 }
 
 // funcMap exposes helpers to templates. Each is deliberately small and total:

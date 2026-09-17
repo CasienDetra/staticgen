@@ -87,6 +87,15 @@ type Page struct {
 	// Prev and Next are chronological neighbours within the page's section,
 	// assigned by the site package after all pages are loaded.
 	Prev, Next *Page
+	Pagination *Pagination
+}
+
+type Pagination struct {
+	Number     int
+	TotalPages int
+	TotalItems int
+	PrevURL    string
+	NextURL    string
 }
 
 // Title returns the page title, which the loader guarantees is non-empty.

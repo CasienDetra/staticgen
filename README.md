@@ -105,6 +105,7 @@ build:
   pretty_urls: true    # /page/ instead of /page.html
   clean_output: true   # clear the output directory before building
   toc: true            # tables of contents
+  paginate: 0          # posts per home/section page; 0 disables pagination
 
 markup:
   unsafe: false        # allow raw HTML in Markdown
@@ -126,6 +127,32 @@ menu:
     url: /blog/
     weight: 2
 ```
+
+### Listing pagination
+
+Set `build.paginate: 10` to show up to ten posts per home or section listing
+page. Pagination is disabled by default (`0`); listings that fit on one page
+stay unchanged. Tags, categories, and archives are not paginated.
+
+Page one keeps its original URL (`/` or `/blog/`). Later pages use `/page/2/`,
+`/page/3/`, or `/blog/page/2/`, and so on—even with `pretty_urls: false`.
+The default theme shows previous/next links and a “Page N of M” indicator.
+Numbered URLs are stable, but adding posts can shift which posts they contain.
+
+An index file's introduction and aliases appear only on page one. Generated
+pagination URLs must not collide with content URLs. Pagination pages appear in
+the sitemap, but later pages are excluded from the search index to avoid
+repeated listing results. RSS retains the full post collection, subject to its
+existing item limit. Keep `clean_output: true` to remove obsolete pagination
+pages when the page count shrinks or pagination is disabled.
+
+Custom home and section templates should iterate `.Page.Pages` for the current
+slice and include `{{ template "partials/pagination.html" . }}` for navigation.
+`.Page.Pagination` is nil unless the listing spans multiple pages; otherwise it
+provides `Number`, `TotalPages`, `TotalItems`, `PrevURL`, and `NextURL`.
+`.Site.RegularPages` and each section's `.Pages` still contain their complete
+collections. Override `templates/partials/pagination.html` to customize the
+navigation independently of the adjacent-post pager.
 
 ### Command reference
 

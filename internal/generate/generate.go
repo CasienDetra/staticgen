@@ -207,7 +207,7 @@ func Search(s *site.Site, bodyLimit int) ([]byte, error) {
 
 	docs := make([]SearchDoc, 0, len(s.Pages))
 	for _, p := range s.Pages {
-		if p.NoIndex {
+		if p.NoIndex || (p.Pagination != nil && p.Pagination.Number > 1) {
 			continue
 		}
 		doc := SearchDoc{
