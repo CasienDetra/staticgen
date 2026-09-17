@@ -117,6 +117,63 @@ func TestPaginationBoundaries(t *testing.T) {
 	}
 }
 
+// Repeated assembly must be stable: pagination slices Pages in place, so a
+// second pass over the same loaded pages would otherwise see an already
+// truncated home listing and skip it.
+func TestPaginationRepeatedAssemble(t *testing.T) {
+	cfg := testConfig()
+	cfg.Build.Paginate = 2
+	pages := []*content.Page{
+		article("/blog/a/", "A", "blog", day(1), nil, nil),
+		article("/blog/b/", "B", "blog", day(2), nil, nil),
+		article("/blog/c/", "C", "blog", day(3), nil, nil),
+		article("/blog/d/", "D", "blog", day(4), nil, nil),
+		article("/blog/e/", "E", "blog", day(5), nil, nil),
+	}
+	pages = append(pages, &content.Page{
+		Kind: content.KindHome, IsIndex: true, URL: "/", Permalink: cfg.BaseURL + "/",
+		OutputPath: "index.html", SourcePath: "index.md",
+		Meta: content.Meta{Title: "Home"},
+	})
+
+	s := mustAssemble(t, cfg, pages)
+	listings := 0
+	for _, p := range s.Pages {
+		if p.Kind == content.KindHome {
+			listings++
+		}
+	}
+	if listings != 3 {
+		t.Fatalf("first assembly produced %d home listings, want 3", listings)
+	}
+
+	again := mustAssemble(t, cfg, pages)
+	if len(again.Home.Pages) != 2 {
+		t.Errorf("second assembly home lists %d posts, want 2", len(again.Home.Pages))
+	}
+	second := 0
+	for _, p := range again.Pages {
+		if p.Kind == content.KindHome && p.Pagination != nil && p.Pagination.Number == 2 {
+			second++
+			if len(p.Pages) != 2 {
+				t.Errorf("second assembly page 2 lists %d posts, want 2", len(p.Pages))
+			}
+		}
+	}
+	if second != 1 {
+		t.Errorf("second assembly produced %d second home pages, want 1", second)
+	}
+
+	cfg.Build.Paginate = 0
+	off := mustAssemble(t, cfg, pages)
+	if off.Home.Pagination != nil {
+		t.Error("disabling pagination must clear stale metadata")
+	}
+	if len(off.Home.Pages) != 5 {
+		t.Errorf("pagination-off assembly lists %d posts, want the full 5", len(off.Home.Pages))
+	}
+}
+
 func TestPaginationRejectsContentURLCollision(t *testing.T) {
 	cfg := testConfig()
 	cfg.Build.Paginate = 1

@@ -10,6 +10,13 @@ import (
 func (a *Assembler) paginate(pages []*content.Page) []*content.Page {
 	size := a.cfg.Build.Paginate
 	if size <= 0 {
+		// Repeated assembly over the same loaded pages must not inherit a
+		// stale Pagination pointer from a previous pass with pagination on.
+		// Pages itself is left alone: the assembler has just restored the
+		// full listings.
+		for _, p := range pages {
+			p.Pagination = nil
+		}
 		return nil
 	}
 	var generated []*content.Page

@@ -63,10 +63,11 @@ func (a *Assembler) Assemble(loaded []*content.Page, now time.Time) (*Site, erro
 	a.linkPrevNext(s)
 	s.Menu = a.buildMenu(s)
 
-	// A home page loaded from index.md arrives with no listing of its own; give
-	// it the site's recent posts so the home layout renders the same way
-	// whether or not the author wrote an index.md.
-	if s.Home != nil && len(s.Home.Pages) == 0 {
+	// Every assembly restores the home listing from the full regular-page
+	// collection. Pagination slices this field in place, so guarding on
+	// emptiness would leave a reused set of loaded pages permanently
+	// truncated after the first pass.
+	if s.Home != nil {
 		s.Home.Pages = s.RegularPages
 	}
 
