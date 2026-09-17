@@ -373,12 +373,18 @@ func regularSorted(pages []*content.Page) []*content.Page {
 // would otherwise mean one page silently overwriting another in the output.
 func checkURLCollisions(pages []*content.Page) error {
 	byURL := map[string][]string{}
+	// With pretty URLs off, distinct URLs can still share an output file: an
+	// article at /page/2/index.html and a pagination page at /page/2/ both
+	// write page/2/index.html. Overwrites happen on disk, so both identities
+	// must be collision-checked.
+	byOutput := map[string][]string{}
 	for _, p := range pages {
 		src := p.SourcePath
 		if src == "" {
 			src = "(generated " + string(p.Kind) + " page)"
 		}
 		byURL[p.URL] = append(byURL[p.URL], src)
+		byOutput[p.OutputPath] = append(byOutput[p.OutputPath], src)
 	}
 
 	var dups []string
@@ -388,6 +394,13 @@ func checkURLCollisions(pages []*content.Page) error {
 		}
 		sort.Strings(srcs)
 		dups = append(dups, fmt.Sprintf("%s is claimed by %s", url, strings.Join(srcs, " and ")))
+	}
+	for out, srcs := range byOutput {
+		if len(srcs) < 2 {
+			continue
+		}
+		sort.Strings(srcs)
+		dups = append(dups, fmt.Sprintf("output file %s is claimed by %s", out, strings.Join(srcs, " and ")))
 	}
 	if len(dups) == 0 {
 		return nil

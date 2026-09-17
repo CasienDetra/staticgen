@@ -174,6 +174,26 @@ func TestPaginationRepeatedAssemble(t *testing.T) {
 	}
 }
 
+// With pretty_urls off, an article URL like /page/2/index.html and a
+// pagination URL like /page/2/ are distinct but both map to the output file
+// page/2/index.html. Assembly must fail rather than silently overwrite the
+// article with the listing.
+func TestPaginationRejectsOutputPathCollision(t *testing.T) {
+	cfg := testConfig()
+	cfg.Build.Paginate = 1
+	cfg.Build.PrettyURLs = false
+	pages := []*content.Page{
+		article("/page/2/index.html", "Reserved", "", day(1), nil, nil),
+		article("/other.html", "Other", "", day(2), nil, nil),
+	}
+	pages[0].OutputPath = "page/2/index.html"
+	pages[1].OutputPath = "other.html"
+	_, err := NewAssembler(cfg).Assemble(pages, buildTime)
+	if err == nil || !strings.Contains(err.Error(), "page/2/index.html") {
+		t.Fatalf("expected output path collision error, got %v", err)
+	}
+}
+
 func TestPaginationRejectsContentURLCollision(t *testing.T) {
 	cfg := testConfig()
 	cfg.Build.Paginate = 1
