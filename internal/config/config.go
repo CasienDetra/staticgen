@@ -79,7 +79,7 @@ type Build struct {
 	CleanOutput bool `yaml:"clean_output"`
 	// SummaryLength is the word count used for auto-generated excerpts.
 	SummaryLength int `yaml:"summary_length"`
-	// Paginate is the number of posts per index page; 0 disables pagination.
+	// Paginate is the number of posts per home or section page; 0 disables pagination.
 	Paginate int `yaml:"paginate"`
 	// TOC renders a table of contents on articles with two or more headings.
 	// Individual pages override it with a toc frontmatter key.

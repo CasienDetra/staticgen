@@ -59,12 +59,6 @@ func (a *Assembler) Assemble(loaded []*content.Page, now time.Time) (*Site, erro
 	all = append(all, taxPages...)
 	all = append(all, archivePages...)
 
-	// Collisions are checked after synthesis so a generated listing page that
-	// clashes with a real file is reported too.
-	if err := checkURLCollisions(all); err != nil {
-		return nil, err
-	}
-
 	s.RegularPages = regularPages(all)
 	a.linkPrevNext(s)
 	s.Menu = a.buildMenu(s)
@@ -74,6 +68,11 @@ func (a *Assembler) Assemble(loaded []*content.Page, now time.Time) (*Site, erro
 	// whether or not the author wrote an index.md.
 	if s.Home != nil && len(s.Home.Pages) == 0 {
 		s.Home.Pages = s.RegularPages
+	}
+
+	all = append(all, a.paginate(all)...)
+	if err := checkURLCollisions(all); err != nil {
+		return nil, err
 	}
 
 	sort.SliceStable(all, func(i, j int) bool {
