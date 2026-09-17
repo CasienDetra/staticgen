@@ -654,6 +654,27 @@ p, ul, ol, blockquote, pre, table {
   font-size: var(--step--1);
 }
 
+.pagination {
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-areas: "previous status next";
+  align-items: center;
+}
+
+.pagination .pager-prev {
+  grid-area: previous;
+}
+
+.pagination .pager-next {
+  grid-area: next;
+}
+
+.pagination-status {
+  grid-area: status;
+  text-align: center;
+  color: var(--fg-muted);
+  font-size: var(--step--1);
+}
+
 /* ---------- footer ---------- */
 
 .site-footer {
@@ -702,6 +723,15 @@ p, ul, ol, blockquote, pre, table {
   }
   .pager {
     grid-template-columns: 1fr;
+  }
+  .pagination {
+    grid-template-areas:
+      "status"
+      "previous"
+      "next";
+  }
+  .pagination-status {
+    margin-block: 0.25rem;
   }
 }
 

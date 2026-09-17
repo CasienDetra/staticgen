@@ -7,4 +7,5 @@
 {{ with .Page.BodyHTML }}<div class="prose">{{ . }}</div>{{ end }}
 
 {{ template "partials/postlist.html" . }}
+{{ template "partials/pagination.html" . }}
 {{ end }}

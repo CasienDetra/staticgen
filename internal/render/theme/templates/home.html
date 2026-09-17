@@ -11,6 +11,8 @@
   {{ template "partials/postlist.html" . }}
 </section>{{ end }}
 
+{{ template "partials/pagination.html" . }}
+
 {{ if .Site.Taxonomy.Tags }}<section class="home-tags">
   <h2 class="section-heading">Browse by tag</h2>
   <ul class="tag-list">

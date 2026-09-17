@@ -1,0 +1,7 @@
+{{ with .Page.Pagination }}
+<nav class="pager pagination" aria-label="Pagination">
+  {{ with .PrevURL }}<a class="pager-link pager-prev" href="{{ . }}" rel="prev">Previous</a>{{ end }}
+  <span class="pagination-status" aria-current="page">Page {{ .Number }} of {{ .TotalPages }}</span>
+  {{ with .NextURL }}<a class="pager-link pager-next" href="{{ . }}" rel="next">Next</a>{{ end }}
+</nav>
+{{ end }}
