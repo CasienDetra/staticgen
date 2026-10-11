@@ -458,11 +458,17 @@ func TestMenuSortIsStableForEqualWeights(t *testing.T) {
 
 // normalize() cannot tell "no base_url yet" from "feeds disabled on purpose",
 // so a base_url supplied by an override has to restore the feed and sitemap.
+// Load is used rather than Default so the recorded feed intent is set, which
+// is where that intent is captured.
 func TestBaseURLOverrideRestoresFeeds(t *testing.T) {
-	cfg := Default()
-	cfg.Root = t.TempDir()
-
-	cfg.normalize()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "site.yaml"), []byte("title: T\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir, filepath.Join(dir, "site.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if cfg.Feeds.RSS || cfg.Feeds.Sitemap {
 		t.Fatal("feeds should be off without a base_url")
 	}
