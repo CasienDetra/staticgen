@@ -251,10 +251,12 @@ func TestAssetsIncludeEmbeddedAndChromaHook(t *testing.T) {
 func TestUserAssetOverridesEmbedded(t *testing.T) {
 	cfg := testConfig(t)
 	dir := filepath.Join(cfg.Root, "templates")
-	if err := os.MkdirAll(filepath.Join(dir, "css"), 0o755); err != nil {
+	// Theme assets live under <templates-dir>/assets, mirroring the embedded
+	// theme layout.
+	if err := os.MkdirAll(filepath.Join(dir, "assets", "css"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "css", "style.css"), []byte("/* MINE */"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "assets", "css", "style.css"), []byte("/* MINE */"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

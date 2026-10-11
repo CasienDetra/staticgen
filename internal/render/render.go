@@ -48,7 +48,8 @@ type Options struct {
 	// LiveReload injects the dev-server reload script. Never enable in a
 	// published build.
 	LiveReload bool
-	// AssetVersion is appended to asset URLs for cache busting.
+	// AssetVersion is appended to asset URLs for cache busting. Empty leaves
+	// asset URLs clean.
 	AssetVersion string
 }
 
@@ -93,16 +94,14 @@ func New(opts Options) (*Engine, error) {
 		return nil, err
 	}
 
-	version := opts.AssetVersion
-	if version == "" {
-		version = time.Now().UTC().Format("20060102150405")
-	}
+	// An empty AssetVersion leaves asset URLs clean; the builder passes an
+	// explicit timestamp for cache busting in production builds.
 	e := &Engine{
 		cfg:        opts.Config,
 		layouts:    sources,
 		assets:     assets,
 		liveReload: opts.LiveReload,
-		version:    version,
+		version:    opts.AssetVersion,
 	}
 
 	funcs := e.funcMap()
