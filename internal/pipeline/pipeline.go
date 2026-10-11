@@ -10,6 +10,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"sort"
 	"time"
 
@@ -34,15 +37,19 @@ type Options struct {
 
 // Result summarises one build.
 type Result struct {
-	Output        string
-	PagesWritten  int
-	Redirects     int
-	AssetsWritten int
-	StaticCopied  int
-	Bytes         int64
-	Duration      time.Duration
-	Warnings      []string
-	Site          *site.Site
+	Output          string
+	PagesWritten    int
+	PagesUnchanged  int
+	Redirects       int
+	AssetsWritten   int
+	AssetsUnchanged int
+	StaticCopied    int
+	// Pruned counts output files removed because no source produced them.
+	Pruned   int
+	Bytes    int64
+	Duration time.Duration
+	Warnings []string
+	Site     *site.Site
 }
 
 // Builder holds the fully wired stages for repeated builds.
@@ -55,6 +62,11 @@ type Builder struct {
 	mapper    fsx.URLMapper
 	now       time.Time
 	live      bool
+	// built records that a build has already run, so a rebuild keeps the
+	// existing output and only rewrites what changed. The dev server builds
+	// repeatedly; wiping the output each time would make every keystroke a
+	// full site rewrite.
+	built bool
 }
 
 // New constructs every stage. Template and configuration errors surface here so
@@ -130,7 +142,10 @@ func (b *Builder) Build(ctx context.Context) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	if b.cfg.Build.CleanOutput {
+	// Only the first build wipes the output. Later builds from the same
+	// builder rewrite only what changed, so the output directory doubles as
+	// the previous build's state.
+	if b.cfg.Build.CleanOutput && !b.built {
 		if err := w.Clean(b.cfg.Root); err != nil {
 			return nil, err
 		}
@@ -157,17 +172,58 @@ func (b *Builder) Build(ctx context.Context) (*Result, error) {
 	}
 	res.StaticCopied = staticStats.Files
 	res.Bytes += staticStats.Bytes
+	// CopyTree writes outside the Writer, so record those paths to keep them
+	// out of the pruning sweep.
+	if err := fsx.Walk(b.cfg.StaticPath(), func(f fsx.SourceFile) error {
+		w.Track(f.RelPath)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
 
 	if err := b.writePages(ctx, w, s, res); err != nil {
 		return nil, err
 	}
 	b.writeGenerated(w, s, res)
 
+	// A rebuild leaves files that no source produces any more, because it
+	// keeps the previous output. Removing them keeps the published tree equal
+	// to a clean build. Pruning is opt-out with clean_output: false, where
+	// the author asked for leftovers to stay.
+	if b.cfg.Build.CleanOutput {
+		res.Pruned = pruneStale(res.Output, w.Paths())
+	}
+
+	b.built = true
 	res.Duration = time.Since(start)
 	if loadErr != nil {
 		return res, loadErr
 	}
 	return res, nil
+}
+
+// pruneStale removes files in the output directory that this build did not
+// produce, and returns how many were removed.
+func pruneStale(dir string, keep []string) int {
+	kept := make(map[string]bool, len(keep))
+	for _, p := range keep {
+		kept[filepath.Clean(p)] = true
+	}
+	removed := 0
+	_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		rel, relErr := filepath.Rel(dir, p)
+		if relErr != nil || kept[rel] {
+			return nil
+		}
+		if os.Remove(p) == nil {
+			removed++
+		}
+		return nil
+	})
+	return removed
 }
 
 // writePages renders every page and any redirects it declares.
@@ -207,11 +263,16 @@ func (b *Builder) writePages(ctx context.Context, w *publish.Writer, s *site.Sit
 		if b.cfg.Build.Minify {
 			doc = minify(doc)
 		}
-		if err := w.Write(p.OutputPath, doc); err != nil {
+		changed, err := w.WriteIfChanged(p.OutputPath, doc)
+		if err != nil {
 			return err
 		}
-		res.PagesWritten++
-		res.Bytes += int64(len(doc))
+		if changed {
+			res.PagesWritten++
+			res.Bytes += int64(len(doc))
+		} else {
+			res.PagesUnchanged++
+		}
 
 		for _, alias := range p.Meta.Aliases {
 			out := b.mapper.OutputPath(normalizeAlias(alias))
@@ -255,11 +316,16 @@ func (b *Builder) writeAssets(w *publish.Writer, res *Result) error {
 			data = []byte(minifyCSS(data))
 		}
 		dest := "assets/" + name
-		if err := w.Write(dest, data); err != nil {
+		changed, err := w.WriteIfChanged(dest, data)
+		if err != nil {
 			return err
 		}
-		res.AssetsWritten++
-		res.Bytes += int64(len(data))
+		if changed {
+			res.AssetsWritten++
+			res.Bytes += int64(len(data))
+		} else {
+			res.AssetsUnchanged++
+		}
 	}
 
 	if b.cfg.Markup.Highlight.Enabled {
@@ -268,10 +334,15 @@ func (b *Builder) writeAssets(w *publish.Writer, res *Result) error {
 			return fmt.Errorf("generate highlight stylesheet: %w", err)
 		}
 		if css != "" {
-			if err := w.Write("assets/css/chroma.css", []byte(css)); err != nil {
+			changed, err := w.WriteIfChanged("assets/css/chroma.css", []byte(css))
+			if err != nil {
 				return err
 			}
-			res.AssetsWritten++
+			if changed {
+				res.AssetsWritten++
+			} else {
+				res.AssetsUnchanged++
+			}
 		}
 	}
 	return nil

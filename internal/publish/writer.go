@@ -86,6 +86,42 @@ func (w *Writer) Write(relPath string, data []byte) error {
 	return nil
 }
 
+// WriteIfChanged writes data unless the destination already has identical bytes.
+// It returns true when the destination was replaced.
+func (w *Writer) WriteIfChanged(relPath string, data []byte) (bool, error) {
+	if relPath == "" {
+		return false, errors.New("publish: empty output path")
+	}
+	dest, err := w.resolve(relPath)
+	if err != nil {
+		return false, err
+	}
+	if old, err := os.ReadFile(dest); err == nil && string(old) == string(data) {
+		w.mu.Lock()
+		w.files[relPath] = int64(len(data))
+		w.mu.Unlock()
+		return false, nil
+	} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return false, fmt.Errorf("publish %s: %w", relPath, err)
+	}
+	if err := w.Write(relPath, data); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// Track records relPath as produced by the current build without writing it.
+// A stage that writes files by another route — the static copy — uses this so
+// incremental pruning keeps those files instead of deleting them as stale.
+func (w *Writer) Track(relPath string) {
+	if relPath == "" {
+		return
+	}
+	w.mu.Lock()
+	w.files[filepath.Clean(filepath.FromSlash(relPath))] = 0
+	w.mu.Unlock()
+}
+
 // resolve maps a site-relative output path to an absolute path, refusing
 // anything that would escape the output directory.
 func (w *Writer) resolve(relPath string) (string, error) {
