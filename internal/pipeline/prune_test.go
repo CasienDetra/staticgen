@@ -111,3 +111,25 @@ func TestPruneThroughSymlinkedOutputRoot(t *testing.T) {
 		t.Error("Pruned = 0, want the stale file counted")
 	}
 }
+
+// Pointing a builder's output at the site root after a build must be
+// rejected before pruning can delete sources.
+func TestChangedOutputToSiteRootIsRejected(t *testing.T) {
+	cfg := fixtureSite(t, nil)
+	builder, err := New(cfg, Options{Now: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err := builder.Build(ctx); err != nil {
+		t.Fatal(err)
+	}
+	builder.Config().Dirs.Output = "."
+	if _, err := builder.Build(ctx); err == nil {
+		t.Fatal("build into the site root succeeded, want refusal")
+	}
+	entries, err := os.ReadDir(cfg.ContentPath())
+	if err != nil || len(entries) == 0 {
+		t.Fatalf("content dir damaged: %v, %d entries", err, len(entries))
+	}
+}

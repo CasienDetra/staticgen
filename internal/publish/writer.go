@@ -138,6 +138,12 @@ func (w *Writer) prepareDir(dir string) error {
 	return fsx.PrepareDirWithin(w.dir, dir)
 }
 
+// CheckCleanTarget reports whether the output directory is safe to clean or
+// prune, without changing anything.
+func (w *Writer) CheckCleanTarget(root string) error {
+	return checkCleanTarget(w.dir, root)
+}
+
 // resolve maps a site-relative output path to an absolute path, refusing
 // anything that would escape the output directory.
 func (w *Writer) resolve(relPath string) (string, error) {

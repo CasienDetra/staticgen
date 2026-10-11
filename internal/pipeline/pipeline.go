@@ -72,6 +72,9 @@ type Builder struct {
 	// imageSums maps each image variant written by the previous build to the
 	// fingerprint of the source and settings it was made from.
 	imageSums map[string]string
+	// cleanTarget is the output directory and site root last validated as
+	// safe to clean and prune.
+	cleanTarget [2]string
 }
 
 // New constructs every stage. Template and configuration errors surface here so
@@ -150,10 +153,25 @@ func (b *Builder) Build(ctx context.Context) (*Result, error) {
 	// Only the first build wipes the output. Later builds from the same
 	// builder rewrite only what changed, so the output directory doubles as
 	// the previous build's state.
-	if b.cfg.Build.CleanOutput && !b.built {
-		if err := w.Clean(b.cfg.Root); err != nil {
-			return nil, err
+	//
+	// Pruning at the end of the build is as destructive as Clean, so the
+	// target is validated before anything is written: on the first build by
+	// Clean itself, and again whenever the output or site root changes (or
+	// clean_output is switched on later). Checking only before writes keeps
+	// Markdown files copied from static from tripping the guard.
+	if b.cfg.Build.CleanOutput {
+		target := [2]string{res.Output, b.cfg.Root}
+		switch {
+		case !b.built:
+			if err := w.Clean(b.cfg.Root); err != nil {
+				return nil, err
+			}
+		case b.cleanTarget != target:
+			if err := w.CheckCleanTarget(b.cfg.Root); err != nil {
+				return nil, err
+			}
 		}
+		b.cleanTarget = target
 	}
 
 	pages, loadErr := b.loader.Load()
@@ -210,10 +228,6 @@ func (b *Builder) Build(ctx context.Context) (*Result, error) {
 	// keeps the previous output. Removing them keeps the published tree equal
 	// to a clean build. Pruning is opt-out with clean_output: false, where
 	// the author asked for leftovers to stay.
-	//
-	// The first build of this Builder always ran Clean, whose target guard
-	// covers pruning too: the output path cannot change between builds, and
-	// re-checking later would trip over Markdown files copied from static.
 	if b.cfg.Build.CleanOutput {
 		res.Pruned = pruneStale(res.Output, w.Paths())
 	}
