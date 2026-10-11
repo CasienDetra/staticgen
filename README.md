@@ -113,6 +113,11 @@ markup:
     enabled: true
     style: github
 
+images:
+  resize: false      # generate downscaled variants of oversized images
+  max_width: 1600    # variants are capped at this width in pixels
+  quality: 82        # 1-100, lossy formats only
+
 feeds:
   rss: true
   sitemap: true
@@ -153,6 +158,31 @@ provides `Number`, `TotalPages`, `TotalItems`, `PrevURL`, and `NextURL`.
 `.Site.RegularPages` and each section's `.Pages` still contain their complete
 collections. Override `templates/partials/pagination.html` to customize the
 navigation independently of the adjacent-post pager.
+
+### Incremental rebuilds
+
+A builder reused across builds — which is what `serve` does on every file
+change — writes only what actually changed, and removes output that no source
+produces any more. Content that is unchanged keeps its exact bytes, so editing
+one post does not rewrite the rest of the site.
+
+Output is cleared only on the first build of a builder. A one-shot
+`staticgen build` therefore still starts from an empty directory. Set
+`build.clean_output: false` to keep stale files and disable pruning as well.
+
+### Image handling
+
+With `images.resize: true`, every static image wider than `max_width` gains a
+downscaled sibling named `<name>-<width>w<ext>`: `photo.jpg` produces
+`photo-1600w.jpg`. The original is copied verbatim, so existing image URLs keep
+working; point `srcset` or an `<img>` at the variant to serve smaller files.
+
+JPEG and TIFF are re-encoded; PNG and GIF are re-compressed. `quality` applies
+to lossy formats only. Within one `staticgen serve` session, rebuilds never
+re-encode unchanged images; a new `staticgen build` re-encodes them but only
+rewrites variants whose bytes changed. Images already within `max_width` get no variant.
+An unreadable image is reported as a build warning rather than failing the
+build.
 
 ### Command reference
 

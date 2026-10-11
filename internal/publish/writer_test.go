@@ -245,3 +245,40 @@ func TestNewWriterRejectsEmptyDir(t *testing.T) {
 		t.Error("NewWriter(\"\") should fail rather than writing into the working directory")
 	}
 }
+
+// A symlinked ancestor whose target already holds the nested directory must
+// not redirect a write outside the output tree.
+func TestWriteDoesNotFollowSymlinkedAncestors(t *testing.T) {
+	dir, outside := t.TempDir(), t.TempDir()
+	if err := os.MkdirAll(filepath.Join(outside, "hello"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	victim := filepath.Join(outside, "hello", "index.html")
+	if err := os.WriteFile(victim, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "blog")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	w, err := NewWriter(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, write := range []func() error{
+		func() error { return w.Write("blog/hello/index.html", []byte("page")) },
+		func() error { _, err := w.WriteIfChanged("blog/hello/index.html", []byte("keep")); return err },
+	} {
+		if err := write(); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := os.ReadFile(victim); err != nil || string(got) != "keep" {
+			t.Fatalf("file outside the output was modified: %q, %v", got, err)
+		}
+	}
+	if st, err := os.Lstat(filepath.Join(dir, "blog")); err != nil || !st.IsDir() {
+		t.Errorf("blog should be a real directory: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(dir, "blog", "hello", "index.html")); err != nil || string(got) != "keep" {
+		t.Errorf("output page = %q, %v", got, err)
+	}
+}

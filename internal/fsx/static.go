@@ -1,6 +1,7 @@
 package fsx
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -70,6 +71,42 @@ func Walk(root string, fn func(SourceFile) error) error {
 	})
 }
 
+// PrepareDirWithin creates dir, which must be root or lie beneath it, without
+// following anything in the way. Walking down from root, a symlink or plain
+// file found where a directory is needed is removed rather than written
+// through, so a stale output entry can neither block nor redirect a write
+// outside root. root itself may be a symlink.
+func PrepareDirWithin(root, dir string) error {
+	rel, err := filepath.Rel(root, dir)
+	if err != nil {
+		return err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return fmt.Errorf("%s is outside %s", dir, root)
+	}
+	if rel != "." {
+		cur := root
+		for _, part := range strings.Split(rel, string(filepath.Separator)) {
+			cur = filepath.Join(cur, part)
+			st, err := os.Lstat(cur)
+			if errors.Is(err, fs.ErrNotExist) {
+				break
+			}
+			if err != nil {
+				return fmt.Errorf("stat %s: %w", cur, err)
+			}
+			if st.IsDir() {
+				continue
+			}
+			if err := os.Remove(cur); err != nil {
+				return fmt.Errorf("replace %s with a directory: %w", cur, err)
+			}
+			break
+		}
+	}
+	return EnsureDir(dir)
+}
+
 // EnsureDir creates dir and its parents.
 func EnsureDir(dir string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -91,21 +128,73 @@ type CopyStats struct {
 // Files are written to a temporary name and renamed into place, so a reader
 // (the dev server) never observes a partially written asset.
 func CopyTree(src, dst string) (CopyStats, error) {
+	return copyTree(src, dst, func(src, dst string, mode os.FileMode) (bool, int64, error) {
+		n, err := CopyFile(src, dst, mode)
+		return true, n, err
+	})
+}
+
+// CopyTreeIfChanged copies a tree, leaving files whose destination already
+// matches the source untouched. Stats count only what was actually written.
+func CopyTreeIfChanged(src, dst string) (CopyStats, error) {
+	return copyTree(src, dst, CopyFileIfChanged)
+}
+
+// copyFunc copies one file and reports whether it wrote the destination.
+type copyFunc func(src, dst string, mode os.FileMode) (bool, int64, error)
+
+func copyTree(src, dst string, copyFn copyFunc) (CopyStats, error) {
 	var stats CopyStats
 	if src == "" {
 		return stats, nil
 	}
 	err := Walk(src, func(f SourceFile) error {
 		target := filepath.Join(dst, filepath.FromSlash(f.RelPath))
-		n, err := CopyFile(f.AbsPath, target, f.Info.Mode().Perm())
+		if err := PrepareDirWithin(dst, filepath.Dir(target)); err != nil {
+			return err
+		}
+		copied, n, err := copyFn(f.AbsPath, target, f.Info.Mode().Perm())
 		if err != nil {
 			return err
+		}
+		if !copied {
+			return nil
 		}
 		stats.Files++
 		stats.Bytes += n
 		return nil
 	})
 	return stats, err
+}
+
+// CopyFileIfChanged copies src to dst unless dst already has identical bytes,
+// in which case nothing is written and false is returned. It reports whether
+// the destination was written.
+func CopyFileIfChanged(src, dst string, mode os.FileMode) (bool, int64, error) {
+	// Compare sizes first: a changed file almost always differs in length, so
+	// the common case avoids reading either file.
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return false, 0, err
+	}
+	if mode == 0 {
+		mode = srcInfo.Mode().Perm()
+	}
+	// A permission-only change still needs a copy, or a newly executable
+	// asset stays non-executable in the output.
+	if dstInfo, err := os.Lstat(dst); err == nil && dstInfo.Mode().IsRegular() &&
+		dstInfo.Size() == srcInfo.Size() && dstInfo.Mode().Perm() == mode.Perm() {
+		existing, rErr := os.ReadFile(dst)
+		source, sErr := os.ReadFile(src)
+		if rErr == nil && sErr == nil && bytes.Equal(existing, source) {
+			return false, 0, nil
+		}
+	}
+	n, err := CopyFile(src, dst, mode)
+	if err != nil {
+		return false, 0, err
+	}
+	return true, n, nil
 }
 
 // CopyFile copies one file to dst atomically, applying mode and the source
@@ -115,7 +204,7 @@ func CopyFile(src, dst string, mode os.FileMode) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("open %s: %w", src, err)
 	}
-	defer in.Close()
+	defer in.Close() //nolint:errcheck // read-only handle
 
 	srcInfo, err := in.Stat()
 	if err != nil {
@@ -138,8 +227,8 @@ func CopyFile(src, dst string, mode os.FileMode) (int64, error) {
 	// output directory with dotfiles.
 	defer func() {
 		if tmpName != "" {
-			tmp.Close()
-			os.Remove(tmpName)
+			_ = tmp.Close()
+			_ = os.Remove(tmpName)
 		}
 	}()
 

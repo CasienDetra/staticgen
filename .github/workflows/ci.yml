@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+          cache: true
+
+      - name: Check formatting
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      # The dev server rebuilds on a watcher goroutine and fans out reload
+      # notifications, so the race detector is load-bearing here.
+      - name: Test
+        run: go test -race -coverprofile=coverage.out ./...
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
+
+  build-example:
+    name: Build example site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+          cache: true
+
+      - name: Build
+        run: go build ./cmd/staticgen
+
+      # The example site is the only fixture that exercises the default theme,
+      # sitemap, feed and search index together.
+      - name: Build the example site
+        run: ./staticgen build -s example -o /tmp/example-out -b https://example.com
+
+      - name: Check the example site
+        run: ./staticgen check -s example -b https://example.com
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+          cache: true
+
+      # Pinned, not "latest": the v1 line cannot read Go 1.27 export data and
+      # fails every package with bogus typecheck errors. golangci-lint v2
+      # needs golangci-lint-action v7 or newer.
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.14

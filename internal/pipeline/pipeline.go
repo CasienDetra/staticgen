@@ -8,9 +8,14 @@ package pipeline
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/casien/staticgen/internal/config"
@@ -34,15 +39,21 @@ type Options struct {
 
 // Result summarises one build.
 type Result struct {
-	Output        string
-	PagesWritten  int
-	Redirects     int
-	AssetsWritten int
-	StaticCopied  int
-	Bytes         int64
-	Duration      time.Duration
-	Warnings      []string
-	Site          *site.Site
+	Output          string
+	PagesWritten    int
+	PagesUnchanged  int
+	Redirects       int
+	AssetsWritten   int
+	AssetsUnchanged int
+	StaticCopied    int
+	// ImagesResized counts downscaled image variants written this build.
+	ImagesResized int
+	// Pruned counts output files removed because no source produced them.
+	Pruned   int
+	Bytes    int64
+	Duration time.Duration
+	Warnings []string
+	Site     *site.Site
 }
 
 // Builder holds the fully wired stages for repeated builds.
@@ -55,6 +66,22 @@ type Builder struct {
 	mapper    fsx.URLMapper
 	now       time.Time
 	live      bool
+	// built records that a build has already run, so a rebuild keeps the
+	// existing output and only rewrites what changed. The dev server builds
+	// repeatedly; wiping the output each time would make every keystroke a
+	// full site rewrite.
+	built bool
+	// imageSums maps each image variant written by the previous build to the
+	// fingerprint of the source and settings it was made from.
+	imageSums map[string]string
+	// cleanTarget is the output directory and site root last validated as
+	// safe to clean and prune.
+	cleanTarget [2]string
+	// published holds the content hashes of the top-level files the last
+	// build wrote to publishedOut (resolved), so a later check can tell them
+	// from source files.
+	publishedOut string
+	published    map[string][sha256.Size]byte
 }
 
 // New constructs every stage. Template and configuration errors surface here so
@@ -130,10 +157,33 @@ func (b *Builder) Build(ctx context.Context) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Only the first build wipes the output. Later builds from the same
+	// builder rewrite only what changed, so the output directory doubles as
+	// the previous build's state.
+	//
+	// Pruning at the end of the build is as destructive as Clean, so the
+	// target is validated before anything is written: on the first build by
+	// Clean itself, and again whenever the output or site root changes (or
+	// clean_output is switched on later). Checking only before writes keeps
+	// Markdown files copied from static from tripping the guard.
 	if b.cfg.Build.CleanOutput {
-		if err := w.Clean(b.cfg.Root); err != nil {
-			return nil, err
+		target := [2]string{res.Output, b.cfg.Root}
+		if !b.built || b.cleanTarget != target {
+			if err := b.checkSourceOverlap(res.Output); err != nil {
+				return nil, err
+			}
 		}
+		switch {
+		case !b.built:
+			if err := w.Clean(b.cfg.Root); err != nil {
+				return nil, err
+			}
+		case b.cleanTarget != target:
+			if err := w.CheckCleanTarget(b.cfg.Root, b.publishedTo(res.Output)); err != nil {
+				return nil, err
+			}
+		}
+		b.cleanTarget = target
 	}
 
 	pages, loadErr := b.loader.Load()
@@ -151,23 +201,168 @@ func (b *Builder) Build(ctx context.Context) (*Result, error) {
 		return nil, err
 	}
 
-	staticStats, err := fsx.CopyTree(b.cfg.StaticPath(), res.Output)
+	// Copy only files that actually changed: a rebuild triggered by a content
+	// edit should not rewrite every static asset.
+	staticStats, err := fsx.CopyTreeIfChanged(b.cfg.StaticPath(), res.Output)
 	if err != nil {
 		return nil, err
 	}
 	res.StaticCopied = staticStats.Files
 	res.Bytes += staticStats.Bytes
+	// CopyTree writes outside the Writer, so record those paths to keep them
+	// out of the pruning sweep.
+	if err := fsx.Walk(b.cfg.StaticPath(), func(f fsx.SourceFile) error {
+		w.Track(f.RelPath)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	// Clear output paths that a page needs as a directory. A file left there
+	// by an earlier build, or copied from the static directory just above,
+	// would otherwise make every page write fail, and would not be pruned
+	// until the end of the build.
+	if err := clearShadowingFiles(res.Output, s.Pages); err != nil {
+		return nil, err
+	}
 
 	if err := b.writePages(ctx, w, s, res); err != nil {
 		return nil, err
 	}
 	b.writeGenerated(w, s, res)
+	sums, err := processImages(b.cfg, b.cfg.StaticPath(), res.Output, w, res, b.imageSums)
+	if err != nil {
+		return nil, err
+	}
+	b.imageSums = sums
 
+	// A rebuild leaves files that no source produces any more, because it
+	// keeps the previous output. Removing them keeps the published tree equal
+	// to a clean build. Pruning is opt-out with clean_output: false, where
+	// the author asked for leftovers to stay.
+	if b.cfg.Build.CleanOutput {
+		res.Pruned = pruneStale(res.Output, w.Paths())
+	}
+
+	b.publishedOut = resolvePath(res.Output)
+	b.published = topLevelFiles(res.Output, w.Paths())
+	b.built = true
 	res.Duration = time.Since(start)
 	if loadErr != nil {
 		return res, loadErr
 	}
 	return res, nil
+}
+
+// clearShadowingFiles removes a plain file sitting where a page needs a
+// directory, e.g. an output blog left by an earlier build or copied from
+// static, which would otherwise make blog/hello/index.html unwritable.
+//
+// Only a file that blocks a required directory is removed, and never outside
+// the output directory.
+func clearShadowingFiles(outDir string, pages []*content.Page) error {
+	for _, p := range pages {
+		dir := filepath.Dir(filepath.Join(outDir, p.OutputPath))
+		cur := dir
+		for len(cur) > len(outDir) && cur != filepath.Dir(cur) {
+			st, err := os.Lstat(cur)
+			if err == nil {
+				if st.IsDir() {
+					break
+				}
+				if st.Mode().IsRegular() {
+					if err := os.Remove(cur); err != nil {
+						return fmt.Errorf("remove %s: %w", cur, err)
+					}
+				}
+				break
+			}
+			cur = filepath.Dir(cur)
+		}
+	}
+	return nil
+}
+
+// publishedTo reports whether name is a top-level file the previous build of
+// this Builder wrote to outDir, e.g. a Markdown asset copied from static, and
+// that is still unmodified.
+func (b *Builder) publishedTo(outDir string) func(name string) bool {
+	return func(name string) bool {
+		want, ok := b.published[name]
+		if !ok || resolvePath(outDir) != b.publishedOut {
+			return false
+		}
+		data, err := os.ReadFile(filepath.Join(outDir, name))
+		return err == nil && sha256.Sum256(data) == want
+	}
+}
+
+func topLevelFiles(outDir string, paths []string) map[string][sha256.Size]byte {
+	top := make(map[string][sha256.Size]byte)
+	for _, p := range paths {
+		if strings.ContainsRune(p, filepath.Separator) {
+			continue
+		}
+		if data, err := os.ReadFile(filepath.Join(outDir, p)); err == nil {
+			top[p] = sha256.Sum256(data)
+		}
+	}
+	return top
+}
+
+// checkSourceOverlap refuses an output directory that is, or contains, a
+// source directory: cleaning or pruning it would delete sources.
+func (b *Builder) checkSourceOverlap(outDir string) error {
+	out := resolvePath(outDir)
+	for _, src := range []string{b.cfg.ContentPath(), b.cfg.StaticPath(), b.cfg.TemplatesPath()} {
+		rel, err := filepath.Rel(out, resolvePath(src))
+		if err != nil {
+			continue
+		}
+		if rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("refusing to clean %s: it contains the source directory %s", outDir, src)
+		}
+	}
+	return nil
+}
+
+// resolvePath follows symlinks in p when it exists.
+func resolvePath(p string) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	return filepath.Clean(p)
+}
+
+// pruneStale removes files in the output directory that this build did not
+// produce, and returns how many were removed.
+func pruneStale(dir string, keep []string) int {
+	kept := make(map[string]bool, len(keep))
+	for _, p := range keep {
+		kept[filepath.Clean(p)] = true
+	}
+	// The output directory itself may be a symlink (e.g. to a web root).
+	// WalkDir does not follow a symlinked root, and would report the link as
+	// a stale file, so walk its target. Links below the root are never
+	// followed: a stale one is removed, its target left alone.
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = resolved
+	}
+	removed := 0
+	_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		rel, relErr := filepath.Rel(dir, p)
+		if relErr != nil || kept[rel] {
+			return nil
+		}
+		if os.Remove(p) == nil {
+			removed++
+		}
+		return nil
+	})
+	return removed
 }
 
 // writePages renders every page and any redirects it declares.
@@ -207,11 +402,16 @@ func (b *Builder) writePages(ctx context.Context, w *publish.Writer, s *site.Sit
 		if b.cfg.Build.Minify {
 			doc = minify(doc)
 		}
-		if err := w.Write(p.OutputPath, doc); err != nil {
+		changed, err := w.WriteIfChanged(p.OutputPath, doc)
+		if err != nil {
 			return err
 		}
-		res.PagesWritten++
-		res.Bytes += int64(len(doc))
+		if changed {
+			res.PagesWritten++
+			res.Bytes += int64(len(doc))
+		} else {
+			res.PagesUnchanged++
+		}
 
 		for _, alias := range p.Meta.Aliases {
 			out := b.mapper.OutputPath(normalizeAlias(alias))
@@ -255,11 +455,16 @@ func (b *Builder) writeAssets(w *publish.Writer, res *Result) error {
 			data = []byte(minifyCSS(data))
 		}
 		dest := "assets/" + name
-		if err := w.Write(dest, data); err != nil {
+		changed, err := w.WriteIfChanged(dest, data)
+		if err != nil {
 			return err
 		}
-		res.AssetsWritten++
-		res.Bytes += int64(len(data))
+		if changed {
+			res.AssetsWritten++
+			res.Bytes += int64(len(data))
+		} else {
+			res.AssetsUnchanged++
+		}
 	}
 
 	if b.cfg.Markup.Highlight.Enabled {
@@ -268,10 +473,15 @@ func (b *Builder) writeAssets(w *publish.Writer, res *Result) error {
 			return fmt.Errorf("generate highlight stylesheet: %w", err)
 		}
 		if css != "" {
-			if err := w.Write("assets/css/chroma.css", []byte(css)); err != nil {
+			changed, err := w.WriteIfChanged("assets/css/chroma.css", []byte(css))
+			if err != nil {
 				return err
 			}
-			res.AssetsWritten++
+			if changed {
+				res.AssetsWritten++
+			} else {
+				res.AssetsUnchanged++
+			}
 		}
 	}
 	return nil

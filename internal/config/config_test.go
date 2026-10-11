@@ -455,3 +455,46 @@ func TestMenuSortIsStableForEqualWeights(t *testing.T) {
 		}
 	}
 }
+
+// normalize() cannot tell "no base_url yet" from "feeds disabled on purpose",
+// so a base_url supplied by an override has to restore the feed and sitemap.
+// Load is used rather than Default so the recorded feed intent is set, which
+// is where that intent is captured.
+func TestBaseURLOverrideRestoresFeeds(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "site.yaml"), []byte("title: T\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir, filepath.Join(dir, "site.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Feeds.RSS || cfg.Feeds.Sitemap {
+		t.Fatal("feeds should be off without a base_url")
+	}
+
+	url := "https://example.com"
+	cfg.Apply(Overrides{BaseURL: url})
+	if !cfg.Feeds.RSS || !cfg.Feeds.Sitemap {
+		t.Error("a base_url override should re-enable the feed and sitemap")
+	}
+	if cfg.BaseURL != url {
+		t.Errorf("BaseURL = %q, want %q", cfg.BaseURL, url)
+	}
+}
+
+func TestBaseURLFromFileKeepsFeeds(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "site.yaml")
+	if err := os.WriteFile(path, []byte("title: X\nbase_url: https://example.com\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(dir, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Feeds.RSS || !cfg.Feeds.Sitemap {
+		t.Error("a base_url in the config file should keep the feed and sitemap on")
+	}
+}

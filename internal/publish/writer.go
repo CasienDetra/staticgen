@@ -49,7 +49,7 @@ func (w *Writer) Write(relPath string, data []byte) error {
 	if err != nil {
 		return err
 	}
-	if err := fsx.EnsureDir(filepath.Dir(dest)); err != nil {
+	if err := w.prepareDir(filepath.Dir(dest)); err != nil {
 		return err
 	}
 
@@ -60,8 +60,8 @@ func (w *Writer) Write(relPath string, data []byte) error {
 	tmpName := tmp.Name()
 	defer func() {
 		if tmpName != "" {
-			tmp.Close()
-			os.Remove(tmpName)
+			_ = tmp.Close()
+			_ = os.Remove(tmpName)
 		}
 	}()
 
@@ -84,6 +84,65 @@ func (w *Writer) Write(relPath string, data []byte) error {
 	w.files[relPath] = int64(len(data))
 	w.mu.Unlock()
 	return nil
+}
+
+// WriteIfChanged writes data unless the destination already has identical bytes.
+// It returns true when the destination was replaced.
+func (w *Writer) WriteIfChanged(relPath string, data []byte) (bool, error) {
+	if relPath == "" {
+		return false, errors.New("publish: empty output path")
+	}
+	dest, err := w.resolve(relPath)
+	if err != nil {
+		return false, err
+	}
+	// Prepare first so the comparison never reads through a symlinked
+	// ancestor, and only trust a regular file at the destination itself.
+	if err := w.prepareDir(filepath.Dir(dest)); err != nil {
+		return false, err
+	}
+	if st, err := os.Lstat(dest); err == nil && !st.Mode().IsRegular() {
+		return true, w.Write(relPath, data)
+	}
+	if old, err := os.ReadFile(dest); err == nil && string(old) == string(data) {
+		w.mu.Lock()
+		w.files[relPath] = int64(len(data))
+		w.mu.Unlock()
+		return false, nil
+	} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return false, fmt.Errorf("publish %s: %w", relPath, err)
+	}
+	if err := w.Write(relPath, data); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// Track records relPath as produced by the current build without writing it.
+// A stage that writes files by another route — the static copy — uses this so
+// incremental pruning keeps those files instead of deleting them as stale.
+func (w *Writer) Track(relPath string) {
+	if relPath == "" {
+		return
+	}
+	w.mu.Lock()
+	w.files[filepath.Clean(filepath.FromSlash(relPath))] = 0
+	w.mu.Unlock()
+}
+
+// prepareDir creates dir beneath the output directory. Incremental builds keep
+// the previous output, so a file that used to be a static asset can sit exactly
+// where a page now needs a directory, and a symlink there would redirect the
+// write outside the output tree; both are replaced with a real directory.
+func (w *Writer) prepareDir(dir string) error {
+	return fsx.PrepareDirWithin(w.dir, dir)
+}
+
+// CheckCleanTarget reports whether the output directory is safe to clean or
+// prune, without changing anything. Top-level Markdown files for which
+// published reports true are known build output rather than sources.
+func (w *Writer) CheckCleanTarget(root string, published func(name string) bool) error {
+	return checkCleanTarget(w.dir, root, published)
 }
 
 // resolve maps a site-relative output path to an absolute path, refusing
@@ -129,7 +188,7 @@ func (w *Writer) Paths() []string {
 // safely nested inside it, which prevents a misconfigured output path from
 // deleting a source tree.
 func (w *Writer) Clean(root string) error {
-	if err := checkCleanTarget(w.dir, root); err != nil {
+	if err := checkCleanTarget(w.dir, root, nil); err != nil {
 		return err
 	}
 	entries, err := os.ReadDir(w.dir)
@@ -155,7 +214,7 @@ func (w *Writer) Clean(root string) error {
 // refuses the specific targets where cleaning would destroy something: the root
 // itself, any ancestor of the root, the filesystem root, the home directory, and
 // any directory that already holds Markdown sources.
-func checkCleanTarget(dir, root string) error {
+func checkCleanTarget(dir, root string, published func(name string) bool) error {
 	absDir, err := filepath.Abs(dir)
 	if err != nil {
 		return err
@@ -190,7 +249,7 @@ func checkCleanTarget(dir, root string) error {
 		if e.IsDir() {
 			continue
 		}
-		if fsx.IsContent(e.Name()) {
+		if fsx.IsContent(e.Name()) && (published == nil || !published(e.Name())) {
 			return fmt.Errorf("refusing to clean %s: it contains Markdown source files", absDir)
 		}
 	}

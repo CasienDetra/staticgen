@@ -37,6 +37,7 @@ type Site struct {
 	Menu   []MenuItem     `yaml:"menu"`
 	Build  Build          `yaml:"build"`
 	Markup Markup         `yaml:"markup"`
+	Images Images         `yaml:"images"`
 	Feeds  Feeds          `yaml:"feeds"`
 	Serve  Serve          `yaml:"serve"`
 	Params map[string]any `yaml:"params"`
@@ -45,6 +46,14 @@ type Site struct {
 	Root string `yaml:"-"`
 	// Path is the config file that was read, or "" when defaults were used.
 	Path string `yaml:"-"`
+	// baseURLFromFile records that a config file supplied base_url, so a
+	// normalize() pass knows not to disable the feed and sitemap for it.
+	baseURLFromFile bool `yaml:"-"`
+	// rssWanted and sitemapWanted record whether the author asked for these
+	// artefacts at all. normalize() clears the toggles when base_url is
+	// missing, so the intent has to be captured before that happens.
+	rssWanted     bool `yaml:"-"`
+	sitemapWanted bool `yaml:"-"`
 }
 
 // Author describes the site or feed author.
@@ -103,6 +112,21 @@ type Highlight struct {
 	GuessLanguage bool   `yaml:"guess_language"`
 }
 
+// Images controls responsive image processing for static assets.
+//
+// When Resize is false, images are copied verbatim. When true, raster images
+// above MaxWidth are downscaled to MaxWidth and re-encoded at Quality,
+// alongside the original rather than in place of it, so existing image URLs
+// keep working. The processed variant is referenced as <name>-<width>w<ext>
+// next to the original: photo.jpg gains a photo-1600w.jpg sibling. Source
+// fingerprints from the previous build decide which variants are current, so
+// an unchanged image is not decoded or re-encoded on a rebuild.
+type Images struct {
+	Resize   bool `yaml:"resize"`
+	MaxWidth int  `yaml:"max_width"`
+	Quality  int  `yaml:"quality"`
+}
+
 // Feeds toggles the ancillary emitters.
 type Feeds struct {
 	RSS      bool `yaml:"rss"`
@@ -147,12 +171,19 @@ func Default() *Site {
 				GuessLanguage: true,
 			},
 		},
+		Images: Images{
+			Resize:   false,
+			MaxWidth: 1600,
+			Quality:  82,
+		},
 		Feeds: Feeds{
 			RSS:      true,
 			RSSLimit: 20,
 			Sitemap:  true,
 			Search:   true,
 		},
+		rssWanted:     true,
+		sitemapWanted: true,
 		Serve: Serve{
 			Host:       "127.0.0.1",
 			Port:       1313,
@@ -199,6 +230,14 @@ func Load(root, path string) (*Site, error) {
 			}
 		}
 		site.Path = resolved
+		site.baseURLFromFile = site.BaseURL != ""
+		intent := statedFeedKeys(string(data))
+		if intent.rssPresent {
+			site.rssWanted = intent.rssWanted
+		}
+		if intent.sitemapPresent {
+			site.sitemapWanted = intent.sitemapWanted
+		}
 	}
 
 	site.normalize()
@@ -206,6 +245,43 @@ func Load(root, path string) (*Site, error) {
 		return nil, err
 	}
 	return site, nil
+}
+
+// feedIntent reports whether the config file stated each feed toggle, and
+// what value it gave. normalize() clears both toggles when base_url is
+// missing, so an override must be able to tell "not asked for" from "asked
+// for and turned off".
+type feedIntent struct {
+	rssPresent, rssWanted         bool
+	sitemapPresent, sitemapWanted bool
+}
+
+// statedFeedKeys reads the feeds block into a feedIntent. Decoded into a loose
+// node map, since Site cannot show which keys were present.
+func statedFeedKeys(raw string) feedIntent {
+	var doc struct {
+		Feeds map[string]yaml.Node `yaml:"feeds"`
+	}
+	var out feedIntent
+	if err := yaml.Unmarshal([]byte(raw), &doc); err != nil {
+		return out
+	}
+	for _, key := range []string{"rss", "sitemap"} {
+		n, ok := doc.Feeds[key]
+		if !ok || n.Tag == "!!null" {
+			continue
+		}
+		var v bool
+		if err := n.Decode(&v); err != nil {
+			continue
+		}
+		if key == "rss" {
+			out.rssPresent, out.rssWanted = true, v
+		} else {
+			out.sitemapPresent, out.sitemapWanted = true, v
+		}
+	}
+	return out
 }
 
 // isEOF reports whether err is the empty-input decode error, which is benign
@@ -274,6 +350,15 @@ func (s *Site) normalize() {
 	if s.Markup.Highlight.Style == "" {
 		s.Markup.Highlight.Style = "github"
 	}
+	if s.Images.MaxWidth <= 0 {
+		s.Images.MaxWidth = 1600
+	}
+	if s.Images.Quality <= 0 {
+		s.Images.Quality = 82
+	}
+	if s.Images.Quality > 100 {
+		s.Images.Quality = 100
+	}
 	if s.Feeds.RSSLimit <= 0 {
 		s.Feeds.RSSLimit = 20
 	}
@@ -291,7 +376,10 @@ func (s *Site) normalize() {
 	// be produced. Turn them off rather than failing the build: base_url is
 	// legitimately unset while a site is being written locally, and the search
 	// index still works because the theme fetches it by site-relative path.
-	if s.BaseURL == "" {
+	//
+	// Only reachable from Load, which normalizes before any CLI override is
+	// applied. Apply restores them when the override supplies a base_url.
+	if s.BaseURL == "" && !s.baseURLFromFile {
 		s.Feeds.RSS = false
 		s.Feeds.Sitemap = false
 	}
@@ -407,6 +495,19 @@ type Overrides struct {
 
 // Apply layers CLI overrides on top of the loaded configuration.
 func (s *Site) Apply(o Overrides) {
+	// normalize() ran during Load and may have turned the feed and sitemap off
+	// because the file had no base_url. A base_url supplied on the command line
+	// makes them possible again, so restore the defaults rather than leaving
+	// the build silently missing them.
+	if o.BaseURL != "" {
+		s.baseURLFromFile = true
+		// Restore only what the absence of a base_url suppressed. An author
+		// who wrote feeds.rss: false still gets no feed.
+		if s.BaseURL == "" {
+			s.Feeds.RSS = s.rssWanted
+			s.Feeds.Sitemap = s.sitemapWanted
+		}
+	}
 	if o.Title != "" {
 		s.Title = o.Title
 	}
