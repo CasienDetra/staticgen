@@ -8,6 +8,7 @@ package pipeline
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -76,10 +77,11 @@ type Builder struct {
 	// cleanTarget is the output directory and site root last validated as
 	// safe to clean and prune.
 	cleanTarget [2]string
-	// published holds the top-level files the last build wrote to
-	// publishedOut, so a later check can tell them from source files.
+	// published holds the content hashes of the top-level files the last
+	// build wrote to publishedOut (resolved), so a later check can tell them
+	// from source files.
 	publishedOut string
-	published    map[string]bool
+	published    map[string][sha256.Size]byte
 }
 
 // New constructs every stage. Template and configuration errors surface here so
@@ -242,8 +244,8 @@ func (b *Builder) Build(ctx context.Context) (*Result, error) {
 		res.Pruned = pruneStale(res.Output, w.Paths())
 	}
 
-	b.publishedOut = res.Output
-	b.published = topLevelFiles(w.Paths())
+	b.publishedOut = resolvePath(res.Output)
+	b.published = topLevelFiles(res.Output, w.Paths())
 	b.built = true
 	res.Duration = time.Since(start)
 	if loadErr != nil {
@@ -282,18 +284,27 @@ func clearShadowingFiles(outDir string, pages []*content.Page) error {
 }
 
 // publishedTo reports whether name is a top-level file the previous build of
-// this Builder wrote to outDir, e.g. a Markdown asset copied from static.
+// this Builder wrote to outDir, e.g. a Markdown asset copied from static, and
+// that is still unmodified.
 func (b *Builder) publishedTo(outDir string) func(name string) bool {
 	return func(name string) bool {
-		return b.publishedOut == outDir && b.published[name]
+		want, ok := b.published[name]
+		if !ok || resolvePath(outDir) != b.publishedOut {
+			return false
+		}
+		data, err := os.ReadFile(filepath.Join(outDir, name))
+		return err == nil && sha256.Sum256(data) == want
 	}
 }
 
-func topLevelFiles(paths []string) map[string]bool {
-	top := make(map[string]bool)
+func topLevelFiles(outDir string, paths []string) map[string][sha256.Size]byte {
+	top := make(map[string][sha256.Size]byte)
 	for _, p := range paths {
-		if !strings.ContainsRune(p, filepath.Separator) {
-			top[p] = true
+		if strings.ContainsRune(p, filepath.Separator) {
+			continue
+		}
+		if data, err := os.ReadFile(filepath.Join(outDir, p)); err == nil {
+			top[p] = sha256.Sum256(data)
 		}
 	}
 	return top

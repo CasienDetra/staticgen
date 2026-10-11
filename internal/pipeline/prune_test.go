@@ -206,3 +206,61 @@ func TestChangedOutputToStaticDirIsRejected(t *testing.T) {
 		t.Fatalf("hidden static file removed: %v", err)
 	}
 }
+
+// A published Markdown file edited after its static original is removed is
+// no longer known output, so enabling clean_output must refuse it.
+func TestEnablingCleanRefusesEditedMarkdown(t *testing.T) {
+	cfg := fixtureSite(t, func(c *config.Site) { c.Build.CleanOutput = false })
+	src := filepath.Join(cfg.StaticPath(), "readme.md")
+	if err := os.WriteFile(src, []byte("# hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	builder, err := New(cfg, Options{Now: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err := builder.Build(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(src); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(cfg.OutputPath(), "readme.md")
+	if err := os.WriteFile(out, []byte("# edited\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	builder.Config().Build.CleanOutput = true
+	if _, err := builder.Build(ctx); err == nil {
+		t.Fatal("build succeeded, want refusal over edited Markdown")
+	}
+	if _, err := os.Stat(out); err != nil {
+		t.Fatalf("edited Markdown removed: %v", err)
+	}
+}
+
+// Retargeting the output to a symlink of the same directory keeps the
+// builder's published Markdown recognised.
+func TestOutputSymlinkAliasKeepsPublishedMarkdown(t *testing.T) {
+	cfg := fixtureSite(t, nil)
+	if err := os.WriteFile(filepath.Join(cfg.StaticPath(), "readme.md"), []byte("# hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	builder, err := New(cfg, Options{Now: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err := builder.Build(ctx); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(cfg.Root, "published")
+	if err := os.Symlink(cfg.OutputPath(), alias); err != nil {
+		t.Fatal(err)
+	}
+	builder.Config().Dirs.Output = alias
+	if _, err := builder.Build(ctx); err != nil {
+		t.Fatalf("rebuild through output alias: %v", err)
+	}
+	mustRead(t, cfg.OutputPath(), "readme.md")
+}
