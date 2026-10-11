@@ -139,9 +139,10 @@ func (w *Writer) prepareDir(dir string) error {
 }
 
 // CheckCleanTarget reports whether the output directory is safe to clean or
-// prune, without changing anything.
-func (w *Writer) CheckCleanTarget(root string) error {
-	return checkCleanTarget(w.dir, root)
+// prune, without changing anything. Top-level Markdown files for which
+// published reports true are known build output rather than sources.
+func (w *Writer) CheckCleanTarget(root string, published func(name string) bool) error {
+	return checkCleanTarget(w.dir, root, published)
 }
 
 // resolve maps a site-relative output path to an absolute path, refusing
@@ -187,7 +188,7 @@ func (w *Writer) Paths() []string {
 // safely nested inside it, which prevents a misconfigured output path from
 // deleting a source tree.
 func (w *Writer) Clean(root string) error {
-	if err := checkCleanTarget(w.dir, root); err != nil {
+	if err := checkCleanTarget(w.dir, root, nil); err != nil {
 		return err
 	}
 	entries, err := os.ReadDir(w.dir)
@@ -213,7 +214,7 @@ func (w *Writer) Clean(root string) error {
 // refuses the specific targets where cleaning would destroy something: the root
 // itself, any ancestor of the root, the filesystem root, the home directory, and
 // any directory that already holds Markdown sources.
-func checkCleanTarget(dir, root string) error {
+func checkCleanTarget(dir, root string, published func(name string) bool) error {
 	absDir, err := filepath.Abs(dir)
 	if err != nil {
 		return err
@@ -248,7 +249,7 @@ func checkCleanTarget(dir, root string) error {
 		if e.IsDir() {
 			continue
 		}
-		if fsx.IsContent(e.Name()) {
+		if fsx.IsContent(e.Name()) && (published == nil || !published(e.Name())) {
 			return fmt.Errorf("refusing to clean %s: it contains Markdown source files", absDir)
 		}
 	}

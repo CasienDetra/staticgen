@@ -7,6 +7,7 @@
 package pipeline
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -167,7 +168,7 @@ func (b *Builder) Build(ctx context.Context) (*Result, error) {
 				return nil, err
 			}
 		case b.cleanTarget != target:
-			if err := w.CheckCleanTarget(b.cfg.Root); err != nil {
+			if err := w.CheckCleanTarget(b.cfg.Root, b.copiedFromStatic(res.Output)); err != nil {
 				return nil, err
 			}
 		}
@@ -267,6 +268,20 @@ func clearShadowingFiles(outDir string, pages []*content.Page) error {
 		}
 	}
 	return nil
+}
+
+// copiedFromStatic reports whether a top-level output file is an identical
+// copy of the static file with the same name, i.e. a Markdown asset an
+// earlier build published rather than a source file.
+func (b *Builder) copiedFromStatic(outDir string) func(name string) bool {
+	return func(name string) bool {
+		src, err := os.ReadFile(filepath.Join(b.cfg.StaticPath(), name))
+		if err != nil {
+			return false
+		}
+		out, err := os.ReadFile(filepath.Join(outDir, name))
+		return err == nil && bytes.Equal(src, out)
+	}
 }
 
 // pruneStale removes files in the output directory that this build did not

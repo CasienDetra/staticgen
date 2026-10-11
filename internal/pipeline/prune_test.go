@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/casien/staticgen/internal/config"
 )
 
 // Pruning must never follow a symlink out of the output directory and delete
@@ -131,5 +133,44 @@ func TestChangedOutputToSiteRootIsRejected(t *testing.T) {
 	entries, err := os.ReadDir(cfg.ContentPath())
 	if err != nil || len(entries) == 0 {
 		t.Fatalf("content dir damaged: %v, %d entries", err, len(entries))
+	}
+}
+
+// Switching clean_output on after a build must not mistake a Markdown asset
+// published from static for a source file.
+func TestEnablingCleanKeepsStaticMarkdown(t *testing.T) {
+	cfg := fixtureSite(t, func(c *config.Site) { c.Build.CleanOutput = false })
+	if err := os.WriteFile(filepath.Join(cfg.StaticPath(), "readme.md"), []byte("# hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	builder, err := New(cfg, Options{Now: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err := builder.Build(ctx); err != nil {
+		t.Fatal(err)
+	}
+	builder.Config().Build.CleanOutput = true
+	if _, err := builder.Build(ctx); err != nil {
+		t.Fatalf("rebuild after enabling clean_output: %v", err)
+	}
+	mustRead(t, cfg.OutputPath(), "readme.md")
+}
+
+// Pointing the output at the content directory must still be refused.
+func TestChangedOutputToContentDirIsRejected(t *testing.T) {
+	cfg := fixtureSite(t, nil)
+	builder, err := New(cfg, Options{Now: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err := builder.Build(ctx); err != nil {
+		t.Fatal(err)
+	}
+	builder.Config().Dirs.Output = cfg.ContentPath()
+	if _, err := builder.Build(ctx); err == nil {
+		t.Fatal("build into the content dir succeeded, want refusal")
 	}
 }
