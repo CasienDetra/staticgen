@@ -168,7 +168,9 @@ func (b *Builder) Build(ctx context.Context) (*Result, error) {
 		return nil, err
 	}
 
-	staticStats, err := fsx.CopyTree(b.cfg.StaticPath(), res.Output)
+	// Copy only files that actually changed: a rebuild triggered by a content
+	// edit should not rewrite every static asset.
+	staticStats, err := fsx.CopyTreeIfChanged(b.cfg.StaticPath(), res.Output)
 	if err != nil {
 		return nil, err
 	}
@@ -180,6 +182,14 @@ func (b *Builder) Build(ctx context.Context) (*Result, error) {
 		w.Track(f.RelPath)
 		return nil
 	}); err != nil {
+		return nil, err
+	}
+
+	// Clear output paths that a page needs as a directory. A file left there
+	// by an earlier build, or copied from the static directory just above,
+	// would otherwise make every page write fail, and would not be pruned
+	// until the end of the build.
+	if err := clearShadowingFiles(res.Output, s.Pages); err != nil {
 		return nil, err
 	}
 
@@ -205,6 +215,35 @@ func (b *Builder) Build(ctx context.Context) (*Result, error) {
 		return res, loadErr
 	}
 	return res, nil
+}
+
+// clearShadowingFiles removes a plain file sitting where a page needs a
+// directory, e.g. an output blog left by an earlier build or copied from
+// static, which would otherwise make blog/hello/index.html unwritable.
+//
+// Only a file that blocks a required directory is removed, and never outside
+// the output directory.
+func clearShadowingFiles(outDir string, pages []*content.Page) error {
+	for _, p := range pages {
+		dir := filepath.Dir(filepath.Join(outDir, p.OutputPath))
+		cur := dir
+		for len(cur) > len(outDir) && cur != filepath.Dir(cur) {
+			st, err := os.Lstat(cur)
+			if err == nil {
+				if st.IsDir() {
+					break
+				}
+				if st.Mode().IsRegular() {
+					if err := os.Remove(cur); err != nil {
+						return fmt.Errorf("remove %s: %w", cur, err)
+					}
+				}
+				break
+			}
+			cur = filepath.Dir(cur)
+		}
+	}
+	return nil
 }
 
 // pruneStale removes files in the output directory that this build did not

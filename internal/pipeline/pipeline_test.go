@@ -272,7 +272,7 @@ func writePNG(t *testing.T, path string, width, height int) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck // test fixture
 	if err := png.Encode(f, img); err != nil {
 		t.Fatal(err)
 	}
@@ -284,7 +284,7 @@ func pngSize(t *testing.T, path string) (int, int) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck // test fixture
 	cfg, err := png.DecodeConfig(f)
 	if err != nil {
 		t.Fatal(err)

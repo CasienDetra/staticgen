@@ -49,7 +49,7 @@ func (w *Writer) Write(relPath string, data []byte) error {
 	if err != nil {
 		return err
 	}
-	if err := fsx.EnsureDir(filepath.Dir(dest)); err != nil {
+	if err := w.prepareDir(filepath.Dir(dest)); err != nil {
 		return err
 	}
 
@@ -60,8 +60,8 @@ func (w *Writer) Write(relPath string, data []byte) error {
 	tmpName := tmp.Name()
 	defer func() {
 		if tmpName != "" {
-			tmp.Close()
-			os.Remove(tmpName)
+			_ = tmp.Close()
+			_ = os.Remove(tmpName)
 		}
 	}()
 
@@ -120,6 +120,39 @@ func (w *Writer) Track(relPath string) {
 	w.mu.Lock()
 	w.files[filepath.Clean(filepath.FromSlash(relPath))] = 0
 	w.mu.Unlock()
+}
+
+// prepareDir creates dir, clearing a file left in its place by an earlier
+// build. Incremental builds keep the previous output, so a file that used to
+// be a static asset can sit exactly where a page now needs a directory and
+// make every subsequent write fail.
+func (w *Writer) prepareDir(dir string) error {
+	// A file sitting where a directory is needed makes MkdirAll fail, and it
+	// can be at any level: public/blog copied from static blocks
+	// public/blog/hello. Walk down to the first component that exists, since
+	// the components below it cannot exist before it does.
+	cur := dir
+	for len(cur) > 1 {
+		st, err := os.Lstat(cur)
+		if err == nil {
+			if st.IsDir() {
+				break
+			}
+			if !st.Mode().IsRegular() && st.Mode()&os.ModeSymlink == 0 {
+				break
+			}
+			if err := os.Remove(cur); err != nil {
+				return fmt.Errorf("publish: replacing %s with a directory: %w", cur, err)
+			}
+			break
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			break
+		}
+		cur = parent
+	}
+	return fsx.EnsureDir(dir)
 }
 
 // resolve maps a site-relative output path to an absolute path, refusing
