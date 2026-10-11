@@ -118,9 +118,9 @@ type Highlight struct {
 // above MaxWidth are downscaled to MaxWidth and re-encoded at Quality,
 // alongside the original rather than in place of it, so existing image URLs
 // keep working. The processed variant is referenced as <name>-<width>w<ext>
-// next to the original: photo.jpg gains a photo-1600w.jpg sibling. A manifest
-// of source fingerprints decides which variants are current, so an unchanged
-// image is never decoded or re-encoded.
+// next to the original: photo.jpg gains a photo-1600w.jpg sibling. Source
+// fingerprints from the previous build decide which variants are current, so
+// an unchanged image is not decoded or re-encoded on a rebuild.
 type Images struct {
 	Resize   bool `yaml:"resize"`
 	MaxWidth int  `yaml:"max_width"`
