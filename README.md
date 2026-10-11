@@ -178,8 +178,9 @@ downscaled sibling named `<name>-<width>w<ext>`: `photo.jpg` produces
 working; point `srcset` or an `<img>` at the variant to serve smaller files.
 
 JPEG and TIFF are re-encoded; PNG and GIF are re-compressed. `quality` applies
-to lossy formats only. Variants are written once and reused, so rebuilds never
-re-encode unchanged images. Images already within `max_width` get no variant.
+to lossy formats only. Within one `staticgen serve` session, rebuilds never
+re-encode unchanged images; a new `staticgen build` re-encodes them but only
+rewrites variants whose bytes changed. Images already within `max_width` get no variant.
 An unreadable image is reported as a build warning rather than failing the
 build.
 

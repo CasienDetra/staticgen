@@ -684,3 +684,40 @@ func TestEmptyStaticFileCountsAsCopied(t *testing.T) {
 		t.Errorf("StaticCopied = %d, want 2 (robots.txt and .keep)", res.StaticCopied)
 	}
 }
+
+// A Markdown file copied from static must not make the next rebuild refuse
+// to prune the output.
+func TestRebuildWithMarkdownStaticAsset(t *testing.T) {
+	cfg := fixtureSite(t, nil)
+	if err := os.WriteFile(filepath.Join(cfg.StaticPath(), "readme.md"), []byte("# hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	builder, err := New(cfg, Options{Now: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	for i := 0; i < 2; i++ {
+		if _, err := builder.Build(ctx); err != nil {
+			t.Fatalf("build %d: %v", i+1, err)
+		}
+	}
+	mustRead(t, cfg.OutputPath(), "readme.md")
+}
+
+// A fresh builder over existing output does not count an identical variant
+// as resized.
+func TestColdRebuildDoesNotCountIdenticalVariants(t *testing.T) {
+	cfg := fixtureSite(t, func(c *config.Site) {
+		c.Images.Resize = true
+		c.Images.MaxWidth = 100
+		c.Build.CleanOutput = false
+	})
+	writePNG(t, filepath.Join(cfg.StaticPath(), "photo.png"), 240, 120)
+	if res := build(t, cfg); res.ImagesResized != 1 {
+		t.Fatalf("first build ImagesResized = %d, want 1", res.ImagesResized)
+	}
+	if res := build(t, cfg); res.ImagesResized != 0 {
+		t.Errorf("cold rebuild ImagesResized = %d, want 0", res.ImagesResized)
+	}
+}

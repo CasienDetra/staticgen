@@ -44,7 +44,8 @@ var rasterExtensions = map[string]bool{
 // older source or different settings. The check happens before decoding, so a
 // rebuild that changed no images does no image work at all. The fingerprints
 // are kept in memory rather than in the output, so nothing internal is
-// published or collides with a static asset.
+// published or collides with a static asset; a fresh process (a new
+// `staticgen build`) re-encodes once and rewrites only variants that differ.
 func processImages(cfg *config.Site, staticDir, outDir string, w *publish.Writer, res *Result, prev map[string]string) (map[string]string, error) {
 	if !cfg.Images.Resize {
 		return nil, nil
@@ -105,11 +106,14 @@ func processImages(cfg *config.Site, staticDir, outDir string, w *publish.Writer
 			return fmt.Errorf("encode %s: %w", rel, err)
 		}
 
-		if _, err := w.WriteIfChanged(out, encoded); err != nil {
+		changed, err := w.WriteIfChanged(out, encoded)
+		if err != nil {
 			return err
 		}
-		res.ImagesResized++
-		res.Bytes += int64(len(encoded))
+		if changed {
+			res.ImagesResized++
+			res.Bytes += int64(len(encoded))
+		}
 		used[out] = sum
 		return nil
 	})

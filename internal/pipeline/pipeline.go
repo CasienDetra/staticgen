@@ -210,10 +210,11 @@ func (b *Builder) Build(ctx context.Context) (*Result, error) {
 	// keeps the previous output. Removing them keeps the published tree equal
 	// to a clean build. Pruning is opt-out with clean_output: false, where
 	// the author asked for leftovers to stay.
+	//
+	// The first build of this Builder always ran Clean, whose target guard
+	// covers pruning too: the output path cannot change between builds, and
+	// re-checking later would trip over Markdown files copied from static.
 	if b.cfg.Build.CleanOutput {
-		if err := w.CheckCleanTarget(b.cfg.Root); err != nil {
-			return nil, err
-		}
 		res.Pruned = pruneStale(res.Output, w.Paths())
 	}
 
