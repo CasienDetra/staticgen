@@ -45,6 +45,9 @@ type Site struct {
 	Root string `yaml:"-"`
 	// Path is the config file that was read, or "" when defaults were used.
 	Path string `yaml:"-"`
+	// baseURLFromFile records that a config file supplied base_url, so a
+	// normalize() pass knows not to disable the feed and sitemap for it.
+	baseURLFromFile bool `yaml:"-"`
 }
 
 // Author describes the site or feed author.
@@ -199,6 +202,7 @@ func Load(root, path string) (*Site, error) {
 			}
 		}
 		site.Path = resolved
+		site.baseURLFromFile = site.BaseURL != ""
 	}
 
 	site.normalize()
@@ -291,7 +295,10 @@ func (s *Site) normalize() {
 	// be produced. Turn them off rather than failing the build: base_url is
 	// legitimately unset while a site is being written locally, and the search
 	// index still works because the theme fetches it by site-relative path.
-	if s.BaseURL == "" {
+	//
+	// Only reachable from Load, which normalizes before any CLI override is
+	// applied. Apply restores them when the override supplies a base_url.
+	if s.BaseURL == "" && !s.baseURLFromFile {
 		s.Feeds.RSS = false
 		s.Feeds.Sitemap = false
 	}
@@ -407,6 +414,17 @@ type Overrides struct {
 
 // Apply layers CLI overrides on top of the loaded configuration.
 func (s *Site) Apply(o Overrides) {
+	// normalize() ran during Load and may have turned the feed and sitemap off
+	// because the file had no base_url. A base_url supplied on the command line
+	// makes them possible again, so restore the defaults rather than leaving
+	// the build silently missing them.
+	if o.BaseURL != "" {
+		s.baseURLFromFile = true
+		if s.BaseURL == "" {
+			s.Feeds.RSS = true
+			s.Feeds.Sitemap = true
+		}
+	}
 	if o.Title != "" {
 		s.Title = o.Title
 	}
