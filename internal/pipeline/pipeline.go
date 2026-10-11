@@ -44,6 +44,8 @@ type Result struct {
 	AssetsWritten   int
 	AssetsUnchanged int
 	StaticCopied    int
+	// ImagesResized counts downscaled image variants written this build.
+	ImagesResized int
 	// Pruned counts output files removed because no source produced them.
 	Pruned   int
 	Bytes    int64
@@ -185,6 +187,9 @@ func (b *Builder) Build(ctx context.Context) (*Result, error) {
 		return nil, err
 	}
 	b.writeGenerated(w, s, res)
+	if err := processImages(b.cfg, b.cfg.StaticPath(), res.Output, w, res); err != nil {
+		return nil, err
+	}
 
 	// A rebuild leaves files that no source produces any more, because it
 	// keeps the previous output. Removing them keeps the published tree equal

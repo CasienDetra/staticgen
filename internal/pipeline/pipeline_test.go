@@ -2,6 +2,9 @@ package pipeline
 
 import (
 	"context"
+	"image"
+	"image/color"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -248,5 +251,98 @@ func TestBuildPrunesDeletedContent(t *testing.T) {
 	}
 	if mustRead(t, cfg.OutputPath(), "robots.txt") != "User-agent: *\n" {
 		t.Error("pruning removed a copied static file")
+	}
+}
+
+// writePNG writes a solid-colour PNG of the given size, for image fixtures.
+func writePNG(t *testing.T, path string, width, height int) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			img.Set(x, y, color.RGBA{R: uint8(x), G: uint8(y), B: 120, A: 255})
+		}
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := png.Encode(f, img); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func pngSize(t *testing.T, path string) (int, int) {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	cfg, err := png.DecodeConfig(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg.Width, cfg.Height
+}
+
+// Oversized images gain a downscaled sibling next to the original, so the
+// original URL keeps working while themes can point at the lighter file.
+func TestBuildResizesOversizedImages(t *testing.T) {
+	cfg := fixtureSite(t, func(c *config.Site) {
+		c.Images.Resize = true
+		c.Images.MaxWidth = 100
+		c.Images.Quality = 80
+	})
+	writePNG(t, filepath.Join(cfg.StaticPath(), "images", "photo.png"), 240, 120)
+	writePNG(t, filepath.Join(cfg.StaticPath(), "images", "small.png"), 60, 30)
+	out := cfg.OutputPath()
+
+	if res := build(t, cfg); len(res.Warnings) != 0 {
+		t.Fatalf("warnings: %v", res.Warnings)
+	}
+
+	if w, h := pngSize(t, filepath.Join(out, "images", "photo.png")); w != 240 || h != 120 {
+		t.Errorf("original was modified: %dx%d, want 240x120", w, h)
+	}
+	if w, h := pngSize(t, filepath.Join(out, "images", "photo-100w.png")); w != 100 || h != 50 {
+		t.Errorf("resized image is %dx%d, want 100x50", w, h)
+	}
+	if _, err := os.Stat(filepath.Join(out, "images", "small-100w.png")); !os.IsNotExist(err) {
+		t.Error("an image already within the limit should not gain a variant")
+	}
+
+	// The variant must survive a rebuild, and must not be re-encoded.
+	variant := filepath.Join(out, "images", "photo-100w.png")
+	before, err := os.ReadFile(variant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(variant, []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	build(t, cfg)
+	if got, err := os.ReadFile(variant); err != nil {
+		t.Fatal(err)
+	} else if string(got) == "stale" {
+		t.Error("rebuild left a stale variant in place")
+	} else if string(got) != string(before) {
+		t.Error("rebuild changed the variant; encoding is not deterministic")
+	}
+}
+
+// Resizing is off by default: images are copied verbatim with no variants.
+func TestBuildLeavesImagesAloneWhenResizeDisabled(t *testing.T) {
+	cfg := fixtureSite(t, nil)
+	writePNG(t, filepath.Join(cfg.StaticPath(), "images", "photo.png"), 240, 120)
+
+	build(t, cfg)
+
+	if _, err := os.Stat(filepath.Join(cfg.OutputPath(), "images", "photo-100w.png")); !os.IsNotExist(err) {
+		t.Error("images.resize is false but a variant was written")
 	}
 }

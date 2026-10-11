@@ -37,6 +37,7 @@ type Site struct {
 	Menu   []MenuItem     `yaml:"menu"`
 	Build  Build          `yaml:"build"`
 	Markup Markup         `yaml:"markup"`
+	Images Images         `yaml:"images"`
 	Feeds  Feeds          `yaml:"feeds"`
 	Serve  Serve          `yaml:"serve"`
 	Params map[string]any `yaml:"params"`
@@ -106,6 +107,21 @@ type Highlight struct {
 	GuessLanguage bool   `yaml:"guess_language"`
 }
 
+// Images controls responsive image processing for static assets.
+//
+// When Resize is false, images are copied verbatim. When true, raster images
+// above MaxWidth are downscaled to MaxWidth and re-encoded at Quality,
+// alongside the original rather than in place of it, so existing image URLs
+// keep working. The processed variant is referenced as <name>-<width>w<ext>
+// next to the original: photo.jpg gains a photo-1600w.jpg sibling. Processed
+// files are content-addressed by a hash cache, so unchanged images are never
+// re-encoded.
+type Images struct {
+	Resize   bool `yaml:"resize"`
+	MaxWidth int  `yaml:"max_width"`
+	Quality  int  `yaml:"quality"`
+}
+
 // Feeds toggles the ancillary emitters.
 type Feeds struct {
 	RSS      bool `yaml:"rss"`
@@ -149,6 +165,11 @@ func Default() *Site {
 				LineNumbers:   false,
 				GuessLanguage: true,
 			},
+		},
+		Images: Images{
+			Resize:   false,
+			MaxWidth: 1600,
+			Quality:  82,
 		},
 		Feeds: Feeds{
 			RSS:      true,
@@ -277,6 +298,15 @@ func (s *Site) normalize() {
 	}
 	if s.Markup.Highlight.Style == "" {
 		s.Markup.Highlight.Style = "github"
+	}
+	if s.Images.MaxWidth <= 0 {
+		s.Images.MaxWidth = 1600
+	}
+	if s.Images.Quality <= 0 {
+		s.Images.Quality = 82
+	}
+	if s.Images.Quality > 100 {
+		s.Images.Quality = 100
 	}
 	if s.Feeds.RSSLimit <= 0 {
 		s.Feeds.RSSLimit = 20
