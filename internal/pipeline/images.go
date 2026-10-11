@@ -2,10 +2,15 @@ package pipeline
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"image"
+	"image/gif"
 	"image/png"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -26,23 +31,63 @@ var rasterExtensions = map[string]bool{
 	".tiff": true,
 }
 
+// imageManifest records the fingerprint each generated variant was built
+// from. The variant filename encodes only the source name and the width, so
+// without this a rebuilt site would keep serving a variant made from an older
+// source or different settings.
+const imageManifest = "staticgen-images.json"
+
 // processImages writes a downscaled sibling for every static image wider than
 // the configured maximum.
 //
 // The original is left untouched, so URLs that already point at it keep
 // working; the variant sits next to it as <name>-<width>w<ext> for themes to
-// reference. Variants are written only when absent, so a rebuild never
-// re-encodes an unchanged image.
+// reference. The fingerprint check happens before decoding, so a rebuild that
+// changed no images does no image work at all.
 func processImages(cfg *config.Site, staticDir, outDir string, w *publish.Writer, res *Result) error {
 	if !cfg.Images.Resize {
 		return nil
 	}
-	return fsx.Walk(staticDir, func(f fsx.SourceFile) error {
+
+	used := map[string]string{}
+	for path, sum := range loadManifest(outDir) {
+		used[path] = sum
+	}
+
+	err := fsx.Walk(staticDir, func(f fsx.SourceFile) error {
 		rel, src := f.RelPath, f.AbsPath
 		ext := strings.ToLower(filepath.Ext(src))
 		if !rasterExtensions[ext] {
 			return nil
 		}
+
+		// An animated GIF carries frames and timing that a single-image
+		// decode cannot carry, so a variant would silently lose the
+		// animation. Skipping keeps the original usable.
+		if ext == ".gif" {
+			if animated, err := isAnimatedGIF(src); err == nil && animated {
+				res.Warnings = append(res.Warnings,
+					fmt.Sprintf("image %s: animated GIF skipped, no downscaled variant written", rel))
+				return nil
+			}
+		}
+
+		out := variantPath(rel, cfg.Images.MaxWidth)
+
+		// Fingerprint the source and every setting that affects the encoded
+		// result, and compare before decoding.
+		sum, err := fingerprint(src, cfg)
+		if err != nil {
+			res.Warnings = append(res.Warnings, fmt.Sprintf("image %s: %v", rel, err))
+			return nil
+		}
+		if used[out] == sum {
+			if _, statErr := os.Stat(filepath.Join(outDir, filepath.FromSlash(out))); statErr == nil {
+				w.Track(out)
+				return nil
+			}
+		}
+
 		img, err := imaging.Open(src, imaging.AutoOrientation(true))
 		if err != nil {
 			// An unreadable or unsupported file is left for the browser to
@@ -50,8 +95,7 @@ func processImages(cfg *config.Site, staticDir, outDir string, w *publish.Writer
 			res.Warnings = append(res.Warnings, fmt.Sprintf("image %s: %v", rel, err))
 			return nil
 		}
-		bounds := img.Bounds()
-		if bounds.Dx() <= cfg.Images.MaxWidth {
+		if img.Bounds().Dx() <= cfg.Images.MaxWidth {
 			return nil
 		}
 		scaled := imaging.Resize(img, cfg.Images.MaxWidth, 0, imaging.Lanczos)
@@ -59,22 +103,53 @@ func processImages(cfg *config.Site, staticDir, outDir string, w *publish.Writer
 		if err != nil {
 			return fmt.Errorf("encode %s: %w", rel, err)
 		}
-		out := variantPath(rel, cfg.Images.MaxWidth)
-		dest := filepath.Join(outDir, filepath.FromSlash(out))
-		if st, err := os.Stat(dest); err == nil && st.Size() > 0 {
-			w.Track(out)
-			return nil
-		}
-		changed, err := w.WriteIfChanged(out, encoded)
-		if err != nil {
+
+		if _, err := w.WriteIfChanged(out, encoded); err != nil {
 			return err
 		}
-		if changed {
-			res.ImagesResized++
-			res.Bytes += int64(len(encoded))
-		}
+		res.ImagesResized++
+		res.Bytes += int64(len(encoded))
+		used[out] = sum
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	return writeManifest(w, used)
+}
+
+func loadManifest(outDir string) map[string]string {
+	out := map[string]string{}
+	data, err := os.ReadFile(filepath.Join(outDir, filepath.FromSlash(imageManifest)))
+	if err != nil {
+		return out
+	}
+	_ = json.Unmarshal(data, &out)
+	return out
+}
+
+// writeManifest persists the fingerprints so the next build can tell a current
+// variant from a stale one.
+func writeManifest(w *publish.Writer, used map[string]string) error {
+	data, err := json.MarshalIndent(used, "", "  ")
+	if err != nil {
+		return err
+	}
+	_, err = w.WriteIfChanged(imageManifest, append(data, '\n'))
+	return err
+}
+
+// fingerprint hashes the source bytes with the settings that change the
+// encoded result, so a changed image or a changed quality invalidates it.
+func fingerprint(src string, cfg *config.Site) (string, error) {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return "", err
+	}
+	h := sha256.New()
+	h.Write(data)
+	fmt.Fprintf(h, "|max_width=%d|quality=%d", cfg.Images.MaxWidth, cfg.Images.Quality)
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // encodeImage re-encodes a scaled image in its original format. Quality
@@ -114,8 +189,22 @@ func pngCompression(quality int) png.CompressionLevel {
 	return png.CompressionLevel(c)
 }
 
+// isAnimatedGIF reports whether the file holds more than one frame.
+func isAnimatedGIF(p string) (bool, error) {
+	f, err := os.Open(p)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+	g, err := gif.DecodeAll(f)
+	if err != nil {
+		return false, err
+	}
+	return len(g.Image) > 1, nil
+}
+
 // variantPath turns images/photo.png into images/photo-100w.png.
 func variantPath(rel string, width int) string {
-	ext := filepath.Ext(rel)
+	ext := path.Ext(rel)
 	return strings.TrimSuffix(rel, ext) + fmt.Sprintf("-%dw%s", width, ext)
 }

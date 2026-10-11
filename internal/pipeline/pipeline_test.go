@@ -4,6 +4,8 @@ import (
 	"context"
 	"image"
 	"image/color"
+	"image/gif"
+	"image/jpeg"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -344,5 +346,276 @@ func TestBuildLeavesImagesAloneWhenResizeDisabled(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(cfg.OutputPath(), "images", "photo-100w.png")); !os.IsNotExist(err) {
 		t.Error("images.resize is false but a variant was written")
+	}
+}
+
+// A rebuilt site must not keep serving a variant made from an older source:
+// the filename encodes the name and width but not the contents.
+func TestImageVariantRefreshedWhenSourceChanges(t *testing.T) {
+	cfg := fixtureSite(t, func(c *config.Site) {
+		c.Images.Resize = true
+		c.Images.MaxWidth = 100
+	})
+	src := filepath.Join(cfg.StaticPath(), "photo.png")
+	writePNGSeed(t, src, 240, 120, 1)
+	builder, err := New(cfg, Options{Now: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err := builder.Build(ctx); err != nil {
+		t.Fatal(err)
+	}
+	before := mustRead(t, cfg.OutputPath(), "photo-100w.png")
+
+	// Same name, same width, different pixels.
+	writePNGSeed(t, src, 240, 120, 2)
+	if _, err := builder.Build(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if mustRead(t, cfg.OutputPath(), "photo-100w.png") == before {
+		t.Error("variant still matches the OLD source after the source changed")
+	}
+}
+
+// An unchanged image must not be decoded and re-encoded on every rebuild:
+// the dev server rebuilds on each keystroke.
+func TestImageVariantSkippedWhenNothingChanged(t *testing.T) {
+	cfg := fixtureSite(t, func(c *config.Site) {
+		c.Images.Resize = true
+		c.Images.MaxWidth = 100
+	})
+	writePNG(t, filepath.Join(cfg.StaticPath(), "photo.png"), 240, 120)
+	builder, err := New(cfg, Options{Now: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	first, err := builder.Build(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ImagesResized == 0 {
+		t.Fatal("first build should have generated a variant")
+	}
+	second, err := builder.Build(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.ImagesResized != 0 {
+		t.Errorf("unchanged rebuild re-encoded %d images, want 0", second.ImagesResized)
+	}
+}
+
+// Changing a setting that affects encoding must invalidate the variant too.
+func TestImageVariantRefreshedWhenQualityChanges(t *testing.T) {
+	cfg := fixtureSite(t, func(c *config.Site) {
+		c.Images.Resize = true
+		c.Images.MaxWidth = 100
+		c.Images.Quality = 90
+	})
+	// JPEG, because PNG output does not depend on quality.
+	writeJPEG(t, filepath.Join(cfg.StaticPath(), "photo.jpg"), 240, 120)
+	builder, err := New(cfg, Options{Now: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err := builder.Build(ctx); err != nil {
+		t.Fatal(err)
+	}
+	before := mustRead(t, cfg.OutputPath(), "photo-100w.jpg")
+
+	cfg.Images.Quality = 10
+	if _, err := builder.Build(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if mustRead(t, cfg.OutputPath(), "photo-100w.jpg") == before {
+		t.Error("changing quality did not invalidate the variant")
+	}
+}
+
+// A one-frame GIF is safe to resize; a multi-frame one must be skipped rather
+// than silently flattened to its first frame.
+func TestAnimatedGIFIsSkipped(t *testing.T) {
+	cfg := fixtureSite(t, func(c *config.Site) {
+		c.Images.Resize = true
+		c.Images.MaxWidth = 40
+	})
+	src := filepath.Join(cfg.StaticPath(), "anim.gif")
+	writeAnimatedGIF(t, src, 200, 100, 3)
+	res := build(t, cfg)
+
+	if _, err := os.Stat(filepath.Join(cfg.OutputPath(), "anim-40w.gif")); !os.IsNotExist(err) {
+		t.Error("an animated GIF must not gain a single-frame variant")
+	}
+	found := false
+	for _, w := range res.Warnings {
+		if strings.Contains(w, "animated GIF") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("skipping an animated GIF should be reported; warnings: %v", res.Warnings)
+	}
+}
+
+// plan9 is the stdlib web-safe palette used for GIF fixtures.
+var plan9 = palette256()
+
+// palette256 builds a full 256-entry palette; gif.EncodeAll needs one entry
+// per possible colour index.
+func palette256() []color.Color {
+	p := make([]color.Color, 256)
+	for i := range p {
+		p[i] = color.RGBA{R: uint8(i), G: uint8(255 - i), B: uint8((i * 7) % 256), A: 255}
+	}
+	return p
+}
+
+// writeAnimatedGIF writes a GIF with the given number of frames.
+func writeAnimatedGIF(t *testing.T, p string, width, height, frames int) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	g := &gif.GIF{LoopCount: 0}
+	for i := 0; i < frames; i++ {
+		frame := image.NewPaletted(image.Rect(0, 0, width, height), plan9)
+		for y := 0; y < height; y++ {
+			for x := 0; x < width; x++ {
+				frame.SetColorIndex(x, y, uint8((x+y+i)%16))
+			}
+		}
+		g.Image = append(g.Image, frame)
+		g.Delay = append(g.Delay, 10)
+	}
+	f, err := os.Create(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := gif.EncodeAll(f, g); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// writePNGSeed writes a PNG whose pixels depend on seed, so two calls produce
+// genuinely different images.
+func writePNGSeed(t *testing.T, path string, width, height, seed int) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			img.Set(x, y, color.RGBA{
+				R: uint8((x + seed*40) % 256),
+				G: uint8((y + seed*90) % 256),
+				B: uint8(seed * 60),
+				A: 255,
+			})
+		}
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := png.Encode(f, img); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// writeJPEG writes a JPEG fixture; JPEG output depends on the quality setting.
+func writeJPEG(t *testing.T, p string, width, height int) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			img.Set(x, y, color.RGBA{R: uint8((x * 3) % 256), G: uint8((y * 5) % 256), B: 90, A: 255})
+		}
+	}
+	f, err := os.Create(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := jpeg.Encode(f, img, &jpeg.Options{Quality: 95}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A stale output file can block a page that needs the same path as a
+// directory. Because a rebuild no longer wipes the output, the stale file has
+// to be cleared before writing rather than only pruned afterwards.
+func TestRebuildClearsStaleFileBlockingAPage(t *testing.T) {
+	cfg := fixtureSite(t, nil)
+	stale := filepath.Join(cfg.StaticPath(), "blog")
+	if err := os.WriteFile(stale, []byte("not a directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	builder, err := New(cfg, Options{Now: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err := builder.Build(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(stale); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := builder.Build(ctx); err != nil {
+		t.Fatalf("rebuild blocked by a stale file: %v", err)
+	}
+	if !strings.Contains(mustRead(t, cfg.OutputPath(), "blog/hello/index.html"), "Hello") {
+		t.Error("the page should have been written after the stale file was cleared")
+	}
+}
+
+// A content-only edit must not rewrite static assets: CopyTreeIfChanged skips
+// destinations whose bytes already match.
+func TestRebuildLeavesUnchangedStaticFilesAlone(t *testing.T) {
+	cfg := fixtureSite(t, nil)
+	builder, err := New(cfg, Options{Now: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err := builder.Build(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	robot := filepath.Join(cfg.OutputPath(), "robots.txt")
+	before, err := os.Stat(robot)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Edit content only; the static tree is untouched.
+	edit := filepath.Join(cfg.Root, "content", "about.md")
+	if err := os.WriteFile(edit, []byte("---\ntitle: About\ndescription: d\n---\nChanged body.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := builder.Build(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(robot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.ModTime().Equal(before.ModTime()) {
+		t.Error("unchanged static file was rewritten")
+	}
+	if res.StaticCopied != 0 {
+		t.Errorf("StaticCopied = %d, want 0 for an unchanged tree", res.StaticCopied)
 	}
 }
