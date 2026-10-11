@@ -69,6 +69,9 @@ type Builder struct {
 	// repeatedly; wiping the output each time would make every keystroke a
 	// full site rewrite.
 	built bool
+	// imageSums maps each image variant written by the previous build to the
+	// fingerprint of the source and settings it was made from.
+	imageSums map[string]string
 }
 
 // New constructs every stage. Template and configuration errors surface here so
@@ -197,15 +200,20 @@ func (b *Builder) Build(ctx context.Context) (*Result, error) {
 		return nil, err
 	}
 	b.writeGenerated(w, s, res)
-	if err := processImages(b.cfg, b.cfg.StaticPath(), res.Output, w, res); err != nil {
+	sums, err := processImages(b.cfg, b.cfg.StaticPath(), res.Output, w, res, b.imageSums)
+	if err != nil {
 		return nil, err
 	}
+	b.imageSums = sums
 
 	// A rebuild leaves files that no source produces any more, because it
 	// keeps the previous output. Removing them keeps the published tree equal
 	// to a clean build. Pruning is opt-out with clean_output: false, where
 	// the author asked for leftovers to stay.
 	if b.cfg.Build.CleanOutput {
+		if err := w.CheckCleanTarget(b.cfg.Root); err != nil {
+			return nil, err
+		}
 		res.Pruned = pruneStale(res.Output, w.Paths())
 	}
 
@@ -252,6 +260,13 @@ func pruneStale(dir string, keep []string) int {
 	kept := make(map[string]bool, len(keep))
 	for _, p := range keep {
 		kept[filepath.Clean(p)] = true
+	}
+	// The output directory itself may be a symlink (e.g. to a web root).
+	// WalkDir does not follow a symlinked root, and would report the link as
+	// a stale file, so walk its target. Links below the root are never
+	// followed: a stale one is removed, its target left alone.
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = resolved
 	}
 	removed := 0
 	_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {

@@ -182,6 +182,8 @@ func Default() *Site {
 			Sitemap:  true,
 			Search:   true,
 		},
+		rssWanted:     true,
+		sitemapWanted: true,
 		Serve: Serve{
 			Host:       "127.0.0.1",
 			Port:       1313,
@@ -198,9 +200,6 @@ func Default() *Site {
 // directory of Markdown files.
 func Load(root, path string) (*Site, error) {
 	site := Default()
-	// Default to what the built-in defaults ask for, so a config file that
-	// omits the feeds block keeps them and an override can restore them.
-	site.rssWanted, site.sitemapWanted = site.Feeds.RSS, site.Feeds.Sitemap
 
 	if root == "" {
 		root = "."

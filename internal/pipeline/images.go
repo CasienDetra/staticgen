@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"image"
 	"image/gif"
@@ -31,28 +30,29 @@ var rasterExtensions = map[string]bool{
 	".tiff": true,
 }
 
-// imageManifest records the fingerprint each generated variant was built
-// from. The variant filename encodes only the source name and the width, so
-// without this a rebuilt site would keep serving a variant made from an older
-// source or different settings.
-const imageManifest = "staticgen-images.json"
-
 // processImages writes a downscaled sibling for every static image wider than
 // the configured maximum.
 //
 // The original is left untouched, so URLs that already point at it keep
 // working; the variant sits next to it as <name>-<width>w<ext> for themes to
-// reference. The fingerprint check happens before decoding, so a rebuild that
-// changed no images does no image work at all.
-func processImages(cfg *config.Site, staticDir, outDir string, w *publish.Writer, res *Result) error {
+// reference.
+//
+// prev maps each variant written by the previous build to the fingerprint of
+// the source and settings it was made from; the returned map is the same for
+// this build. The variant filename encodes only the source name and the
+// width, so without it a rebuild would keep serving a variant made from an
+// older source or different settings. The check happens before decoding, so a
+// rebuild that changed no images does no image work at all. The fingerprints
+// are kept in memory rather than in the output, so nothing internal is
+// published or collides with a static asset.
+func processImages(cfg *config.Site, staticDir, outDir string, w *publish.Writer, res *Result, prev map[string]string) (map[string]string, error) {
 	if !cfg.Images.Resize {
-		return nil
+		return nil, nil
 	}
 
+	// Built only from variants this build produced or reused, so a removed
+	// or shrunk image drops out.
 	used := map[string]string{}
-	for path, sum := range loadManifest(outDir) {
-		used[path] = sum
-	}
 
 	err := fsx.Walk(staticDir, func(f fsx.SourceFile) error {
 		rel, src := f.RelPath, f.AbsPath
@@ -81,9 +81,10 @@ func processImages(cfg *config.Site, staticDir, outDir string, w *publish.Writer
 			res.Warnings = append(res.Warnings, fmt.Sprintf("image %s: %v", rel, err))
 			return nil
 		}
-		if used[out] == sum {
+		if prev[out] == sum {
 			if _, statErr := os.Stat(filepath.Join(outDir, filepath.FromSlash(out))); statErr == nil {
 				w.Track(out)
+				used[out] = sum
 				return nil
 			}
 		}
@@ -113,30 +114,9 @@ func processImages(cfg *config.Site, staticDir, outDir string, w *publish.Writer
 		return nil
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return writeManifest(w, used)
-}
-
-func loadManifest(outDir string) map[string]string {
-	out := map[string]string{}
-	data, err := os.ReadFile(filepath.Join(outDir, filepath.FromSlash(imageManifest)))
-	if err != nil {
-		return out
-	}
-	_ = json.Unmarshal(data, &out)
-	return out
-}
-
-// writeManifest persists the fingerprints so the next build can tell a current
-// variant from a stale one.
-func writeManifest(w *publish.Writer, used map[string]string) error {
-	data, err := json.MarshalIndent(used, "", "  ")
-	if err != nil {
-		return err
-	}
-	_, err = w.WriteIfChanged(imageManifest, append(data, '\n'))
-	return err
+	return used, nil
 }
 
 // fingerprint hashes the source bytes with the settings that change the

@@ -72,3 +72,42 @@ func TestPruneRemovesSymlinkNotTarget(t *testing.T) {
 		t.Error("stale symlink itself should have been pruned")
 	}
 }
+
+// An output directory that is itself a symlink (e.g. to a web root) is
+// pruned through, not deleted as a stale file.
+func TestPruneThroughSymlinkedOutputRoot(t *testing.T) {
+	real := t.TempDir()
+	cfg := fixtureSite(t, nil)
+	if err := os.Symlink(real, cfg.OutputPath()); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	builder, err := New(cfg, Options{Now: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err := builder.Build(ctx); err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(real, "stale.html")
+	if err := os.WriteFile(stale, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := builder.Build(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if st, err := os.Lstat(cfg.OutputPath()); err != nil || st.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("output symlink was removed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(real, "index.html")); err != nil {
+		t.Errorf("build output missing behind the symlink: %v", err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Error("stale file behind the symlinked output was not pruned")
+	}
+	if res.Pruned == 0 {
+		t.Error("Pruned = 0, want the stale file counted")
+	}
+}

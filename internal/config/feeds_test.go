@@ -57,3 +57,12 @@ func TestFeedsEnabledByFlagWithoutConfig(t *testing.T) {
 		t.Errorf("defaults should apply with -b: rss=%v sitemap=%v", cfg.Feeds.RSS, cfg.Feeds.Sitemap)
 	}
 }
+
+// Default() and Apply() used directly, without Load, must keep the feeds.
+func TestDefaultKeepsFeedsOnBaseURLOverride(t *testing.T) {
+	cfg := Default()
+	cfg.Apply(Overrides{BaseURL: "https://example.com"})
+	if !cfg.Feeds.RSS || !cfg.Feeds.Sitemap {
+		t.Errorf("rss=%v sitemap=%v, want both true", cfg.Feeds.RSS, cfg.Feeds.Sitemap)
+	}
+}

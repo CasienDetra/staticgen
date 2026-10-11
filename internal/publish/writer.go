@@ -96,6 +96,14 @@ func (w *Writer) WriteIfChanged(relPath string, data []byte) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	// Prepare first so the comparison never reads through a symlinked
+	// ancestor, and only trust a regular file at the destination itself.
+	if err := w.prepareDir(filepath.Dir(dest)); err != nil {
+		return false, err
+	}
+	if st, err := os.Lstat(dest); err == nil && !st.Mode().IsRegular() {
+		return true, w.Write(relPath, data)
+	}
 	if old, err := os.ReadFile(dest); err == nil && string(old) == string(data) {
 		w.mu.Lock()
 		w.files[relPath] = int64(len(data))
@@ -122,37 +130,18 @@ func (w *Writer) Track(relPath string) {
 	w.mu.Unlock()
 }
 
-// prepareDir creates dir, clearing a file left in its place by an earlier
-// build. Incremental builds keep the previous output, so a file that used to
-// be a static asset can sit exactly where a page now needs a directory and
-// make every subsequent write fail.
+// prepareDir creates dir beneath the output directory. Incremental builds keep
+// the previous output, so a file that used to be a static asset can sit exactly
+// where a page now needs a directory, and a symlink there would redirect the
+// write outside the output tree; both are replaced with a real directory.
 func (w *Writer) prepareDir(dir string) error {
-	// A file sitting where a directory is needed makes MkdirAll fail, and it
-	// can be at any level: public/blog copied from static blocks
-	// public/blog/hello. Walk down to the first component that exists, since
-	// the components below it cannot exist before it does.
-	cur := dir
-	for len(cur) > 1 {
-		st, err := os.Lstat(cur)
-		if err == nil {
-			if st.IsDir() {
-				break
-			}
-			if !st.Mode().IsRegular() && st.Mode()&os.ModeSymlink == 0 {
-				break
-			}
-			if err := os.Remove(cur); err != nil {
-				return fmt.Errorf("publish: replacing %s with a directory: %w", cur, err)
-			}
-			break
-		}
-		parent := filepath.Dir(cur)
-		if parent == cur {
-			break
-		}
-		cur = parent
-	}
-	return fsx.EnsureDir(dir)
+	return fsx.PrepareDirWithin(w.dir, dir)
+}
+
+// CheckCleanTarget reports whether the output directory is safe to delete
+// files from, applying the same guard as Clean.
+func (w *Writer) CheckCleanTarget(root string) error {
+	return checkCleanTarget(w.dir, root)
 }
 
 // resolve maps a site-relative output path to an absolute path, refusing

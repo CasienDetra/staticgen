@@ -619,3 +619,68 @@ func TestRebuildLeavesUnchangedStaticFilesAlone(t *testing.T) {
 		t.Errorf("StaticCopied = %d, want 0 for an unchanged tree", res.StaticCopied)
 	}
 }
+
+// Image fingerprints are internal: they must not be published or replace a
+// static asset of any name.
+func TestImageFingerprintsAreNotPublished(t *testing.T) {
+	cfg := fixtureSite(t, func(c *config.Site) {
+		c.Images.Resize = true
+		c.Images.MaxWidth = 100
+	})
+	writePNG(t, filepath.Join(cfg.StaticPath(), "photo.png"), 240, 120)
+	payload := `{"app":"data"}`
+	if err := os.WriteFile(filepath.Join(cfg.StaticPath(), "staticgen-images.json"), []byte(payload), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	build(t, cfg)
+
+	if got := mustRead(t, cfg.OutputPath(), "staticgen-images.json"); got != payload {
+		t.Errorf("static asset was replaced: %q", got)
+	}
+}
+
+// A removed image drops out of the fingerprints, so it cannot linger.
+func TestRemovedImageDropsFromFingerprints(t *testing.T) {
+	cfg := fixtureSite(t, func(c *config.Site) {
+		c.Images.Resize = true
+		c.Images.MaxWidth = 100
+	})
+	src := filepath.Join(cfg.StaticPath(), "photo.png")
+	writePNG(t, src, 240, 120)
+	builder, err := New(cfg, Options{Now: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err := builder.Build(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := builder.imageSums["photo-100w.png"]; !ok {
+		t.Fatalf("fingerprint missing after first build: %v", builder.imageSums)
+	}
+
+	if err := os.Remove(src); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := builder.Build(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(builder.imageSums) != 0 {
+		t.Errorf("removed image still fingerprinted: %v", builder.imageSums)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.OutputPath(), "photo-100w.png")); !os.IsNotExist(err) {
+		t.Error("variant of a removed image was not pruned")
+	}
+}
+
+// A new empty static file is counted as copied.
+func TestEmptyStaticFileCountsAsCopied(t *testing.T) {
+	cfg := fixtureSite(t, nil)
+	if err := os.WriteFile(filepath.Join(cfg.StaticPath(), ".keep"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if res := build(t, cfg); res.StaticCopied != 2 {
+		t.Errorf("StaticCopied = %d, want 2 (robots.txt and .keep)", res.StaticCopied)
+	}
+}
