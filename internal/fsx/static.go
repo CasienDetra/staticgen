@@ -1,6 +1,7 @@
 package fsx
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -91,21 +92,64 @@ type CopyStats struct {
 // Files are written to a temporary name and renamed into place, so a reader
 // (the dev server) never observes a partially written asset.
 func CopyTree(src, dst string) (CopyStats, error) {
+	return copyTree(src, dst, CopyFile, true)
+}
+
+// CopyTreeIfChanged copies a tree, leaving files whose destination already
+// matches the source untouched. Stats count only what was actually written.
+func CopyTreeIfChanged(src, dst string) (CopyStats, error) {
+	return copyTree(src, dst, func(src, dst string, mode os.FileMode) (int64, error) {
+		_, n, err := CopyFileIfChanged(src, dst, mode)
+		return n, err
+	}, false)
+}
+
+type copyFunc func(src, dst string, mode os.FileMode) (int64, error)
+
+func copyTree(src, dst string, copyFn copyFunc, countSkips bool) (CopyStats, error) {
 	var stats CopyStats
 	if src == "" {
 		return stats, nil
 	}
 	err := Walk(src, func(f SourceFile) error {
 		target := filepath.Join(dst, filepath.FromSlash(f.RelPath))
-		n, err := CopyFile(f.AbsPath, target, f.Info.Mode().Perm())
+		n, err := copyFn(f.AbsPath, target, f.Info.Mode().Perm())
 		if err != nil {
 			return err
+		}
+		if n == 0 && !countSkips {
+			// copyFn reports zero bytes for an unchanged file.
+			return nil
 		}
 		stats.Files++
 		stats.Bytes += n
 		return nil
 	})
 	return stats, err
+}
+
+// CopyFileIfChanged copies src to dst unless dst already has identical bytes,
+// in which case nothing is written and false is returned. It reports whether
+// the destination was written.
+func CopyFileIfChanged(src, dst string, mode os.FileMode) (bool, int64, error) {
+	// Compare sizes first: a changed file almost always differs in length, so
+	// the common case avoids reading either file.
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return false, 0, err
+	}
+	if dstInfo, err := os.Stat(dst); err == nil && dstInfo.Size() == srcInfo.Size() {
+		existing, rErr := os.ReadFile(dst)
+		source, sErr := os.ReadFile(src)
+		if rErr == nil && sErr == nil && bytes.Equal(existing, source) {
+			return false, 0, nil
+		}
+	}
+	n, err := CopyFile(src, dst, mode)
+	if err != nil {
+		return false, 0, err
+	}
+	return true, n, nil
 }
 
 // CopyFile copies one file to dst atomically, applying mode and the source
@@ -115,7 +159,7 @@ func CopyFile(src, dst string, mode os.FileMode) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("open %s: %w", src, err)
 	}
-	defer in.Close()
+	defer in.Close() //nolint:errcheck // read-only handle
 
 	srcInfo, err := in.Stat()
 	if err != nil {
@@ -138,8 +182,8 @@ func CopyFile(src, dst string, mode os.FileMode) (int64, error) {
 	// output directory with dotfiles.
 	defer func() {
 		if tmpName != "" {
-			tmp.Close()
-			os.Remove(tmpName)
+			_ = tmp.Close()
+			_ = os.Remove(tmpName)
 		}
 	}()
 
