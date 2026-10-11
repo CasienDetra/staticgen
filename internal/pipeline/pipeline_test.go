@@ -494,7 +494,7 @@ func writeAnimatedGIF(t *testing.T, p string, width, height, frames int) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck // test fixture
 	if err := gif.EncodeAll(f, g); err != nil {
 		t.Fatal(err)
 	}
@@ -522,7 +522,7 @@ func writePNGSeed(t *testing.T, path string, width, height, seed int) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck // test fixture
 	if err := png.Encode(f, img); err != nil {
 		t.Fatal(err)
 	}
@@ -544,7 +544,7 @@ func writeJPEG(t *testing.T, p string, width, height int) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck // test fixture
 	if err := jpeg.Encode(f, img, &jpeg.Options{Quality: 95}); err != nil {
 		t.Fatal(err)
 	}
