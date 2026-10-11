@@ -116,7 +116,7 @@ func TestWatcherAddTree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer w.Close()
+	defer w.Close() //nolint:errcheck // test fixture
 
 	if err := w.AddTree(root); err != nil {
 		t.Fatal(err)
@@ -162,7 +162,7 @@ func TestWatcherReportsNewFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer w.Close()
+	defer w.Close() //nolint:errcheck // test fixture
 
 	if err := w.AddTree(root); err != nil {
 		t.Fatal(err)

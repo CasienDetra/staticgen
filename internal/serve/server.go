@@ -114,7 +114,7 @@ func (s *Server) Start(ctx context.Context, onReady func(url string)) error {
 	if err != nil {
 		return err
 	}
-	defer watcher.Close()
+	defer watcher.Close() //nolint:errcheck // closed on shutdown
 	s.watch = watcher
 
 	for _, dir := range s.watchDirs {

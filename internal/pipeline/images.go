@@ -148,7 +148,7 @@ func fingerprint(src string, cfg *config.Site) (string, error) {
 	}
 	h := sha256.New()
 	h.Write(data)
-	fmt.Fprintf(h, "|max_width=%d|quality=%d", cfg.Images.MaxWidth, cfg.Images.Quality)
+	_, _ = fmt.Fprintf(h, "|max_width=%d|quality=%d", cfg.Images.MaxWidth, cfg.Images.Quality)
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
@@ -195,7 +195,7 @@ func isAnimatedGIF(p string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck // read-only handle
 	g, err := gif.DecodeAll(f)
 	if err != nil {
 		return false, err

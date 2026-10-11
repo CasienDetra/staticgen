@@ -112,7 +112,8 @@ func changedBool(cmd *cobra.Command, name string) *bool {
 
 // printf writes to the CLI's output stream.
 func (g *globalFlags) printf(format string, args ...any) {
-	fmt.Fprintf(g.out, format, args...)
+	// A write failure on the CLI's own stream is not actionable.
+	_, _ = fmt.Fprintf(g.out, format, args...)
 }
 
 // errf formats an error for display, stripping Cobra's own prefix noise.
