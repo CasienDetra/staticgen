@@ -7,7 +7,6 @@
 package pipeline
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -15,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/casien/staticgen/internal/config"
@@ -76,6 +76,10 @@ type Builder struct {
 	// cleanTarget is the output directory and site root last validated as
 	// safe to clean and prune.
 	cleanTarget [2]string
+	// published holds the top-level files the last build wrote to
+	// publishedOut, so a later check can tell them from source files.
+	publishedOut string
+	published    map[string]bool
 }
 
 // New constructs every stage. Template and configuration errors surface here so
@@ -162,13 +166,18 @@ func (b *Builder) Build(ctx context.Context) (*Result, error) {
 	// Markdown files copied from static from tripping the guard.
 	if b.cfg.Build.CleanOutput {
 		target := [2]string{res.Output, b.cfg.Root}
+		if !b.built || b.cleanTarget != target {
+			if err := b.checkSourceOverlap(res.Output); err != nil {
+				return nil, err
+			}
+		}
 		switch {
 		case !b.built:
 			if err := w.Clean(b.cfg.Root); err != nil {
 				return nil, err
 			}
 		case b.cleanTarget != target:
-			if err := w.CheckCleanTarget(b.cfg.Root, b.copiedFromStatic(res.Output)); err != nil {
+			if err := w.CheckCleanTarget(b.cfg.Root, b.publishedTo(res.Output)); err != nil {
 				return nil, err
 			}
 		}
@@ -233,6 +242,8 @@ func (b *Builder) Build(ctx context.Context) (*Result, error) {
 		res.Pruned = pruneStale(res.Output, w.Paths())
 	}
 
+	b.publishedOut = res.Output
+	b.published = topLevelFiles(w.Paths())
 	b.built = true
 	res.Duration = time.Since(start)
 	if loadErr != nil {
@@ -270,18 +281,46 @@ func clearShadowingFiles(outDir string, pages []*content.Page) error {
 	return nil
 }
 
-// copiedFromStatic reports whether a top-level output file is an identical
-// copy of the static file with the same name, i.e. a Markdown asset an
-// earlier build published rather than a source file.
-func (b *Builder) copiedFromStatic(outDir string) func(name string) bool {
+// publishedTo reports whether name is a top-level file the previous build of
+// this Builder wrote to outDir, e.g. a Markdown asset copied from static.
+func (b *Builder) publishedTo(outDir string) func(name string) bool {
 	return func(name string) bool {
-		src, err := os.ReadFile(filepath.Join(b.cfg.StaticPath(), name))
-		if err != nil {
-			return false
-		}
-		out, err := os.ReadFile(filepath.Join(outDir, name))
-		return err == nil && bytes.Equal(src, out)
+		return b.publishedOut == outDir && b.published[name]
 	}
+}
+
+func topLevelFiles(paths []string) map[string]bool {
+	top := make(map[string]bool)
+	for _, p := range paths {
+		if !strings.ContainsRune(p, filepath.Separator) {
+			top[p] = true
+		}
+	}
+	return top
+}
+
+// checkSourceOverlap refuses an output directory that is, or contains, a
+// source directory: cleaning or pruning it would delete sources.
+func (b *Builder) checkSourceOverlap(outDir string) error {
+	out := resolvePath(outDir)
+	for _, src := range []string{b.cfg.ContentPath(), b.cfg.StaticPath(), b.cfg.TemplatesPath()} {
+		rel, err := filepath.Rel(out, resolvePath(src))
+		if err != nil {
+			continue
+		}
+		if rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("refusing to clean %s: it contains the source directory %s", outDir, src)
+		}
+	}
+	return nil
+}
+
+// resolvePath follows symlinks in p when it exists.
+func resolvePath(p string) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	return filepath.Clean(p)
 }
 
 // pruneStale removes files in the output directory that this build did not

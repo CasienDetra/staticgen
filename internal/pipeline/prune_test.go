@@ -174,3 +174,35 @@ func TestChangedOutputToContentDirIsRejected(t *testing.T) {
 		t.Fatal("build into the content dir succeeded, want refusal")
 	}
 }
+
+// Pointing the output at the static directory must be refused before
+// pruning can delete untracked files such as those in hidden directories.
+func TestChangedOutputToStaticDirIsRejected(t *testing.T) {
+	cfg := fixtureSite(t, nil)
+	static := cfg.StaticPath()
+	if err := os.WriteFile(filepath.Join(static, "readme.md"), []byte("# hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	hidden := filepath.Join(static, ".archive", "original.txt")
+	if err := os.MkdirAll(filepath.Dir(hidden), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hidden, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	builder, err := New(cfg, Options{Now: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err := builder.Build(ctx); err != nil {
+		t.Fatal(err)
+	}
+	builder.Config().Dirs.Output = static
+	if _, err := builder.Build(ctx); err == nil {
+		t.Fatal("build into the static dir succeeded, want refusal")
+	}
+	if _, err := os.Stat(hidden); err != nil {
+		t.Fatalf("hidden static file removed: %v", err)
+	}
+}
