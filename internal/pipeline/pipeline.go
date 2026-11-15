@@ -61,6 +61,7 @@ type Builder struct {
 	cfg       *config.Site
 	md        *markdown.Renderer
 	loader    *content.Loader
+	loaders   []*content.Loader
 	assembler *site.Assembler
 	engine    *render.Engine
 	mapper    fsx.URLMapper
@@ -117,19 +118,50 @@ func New(cfg *config.Site, opts Options) (*Builder, error) {
 		return nil, err
 	}
 
-	loader := content.NewLoader(cfg.ContentPath(), md, content.LoadOptions{
+	baseOptions := content.LoadOptions{
 		IncludeDrafts: cfg.Build.Drafts,
 		IncludeFuture: cfg.Build.Future,
 		PrettyURLs:    cfg.Build.PrettyURLs,
 		SummaryWords:  cfg.Build.SummaryLength,
 		BaseURL:       cfg.BaseURL,
 		Now:           now,
-	})
+		Locale:        cfg.Language,
+	}
+	for _, locale := range cfg.Locales {
+		if locale.Code != cfg.Language && locale.Content == "" {
+			baseOptions.ExcludeDirs = append(baseOptions.ExcludeDirs, locale.Code)
+		} else if locale.Code != cfg.Language && locale.Content != "" {
+			if rel, err := filepath.Rel(cfg.ContentPath(), cfg.LocaleContentPath(locale)); err == nil &&
+				rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				baseOptions.ExcludeDirs = append(baseOptions.ExcludeDirs, filepath.ToSlash(rel))
+			}
+		}
+	}
+	loader := content.NewLoader(cfg.ContentPath(), md, baseOptions)
 
+	loaders := make([]*content.Loader, 0, len(cfg.Locales))
+	for _, locale := range cfg.Locales {
+		root := cfg.LocaleContentPath(locale)
+		if root == cfg.ContentPath() {
+			loaders = append(loaders, loader)
+			continue
+		}
+		loaders = append(loaders, content.NewLoader(root, md, content.LoadOptions{
+			IncludeDrafts: cfg.Build.Drafts,
+			IncludeFuture: cfg.Build.Future,
+			PrettyURLs:    cfg.Build.PrettyURLs,
+			SummaryWords:  cfg.Build.SummaryLength,
+			BaseURL:       cfg.BaseURL,
+			Now:           now,
+			Locale:        locale.Code,
+			URLPrefix:     locale.URLPrefix,
+		}))
+	}
 	return &Builder{
 		cfg:       cfg,
 		md:        md,
 		loader:    loader,
+		loaders:   loaders,
 		assembler: site.NewAssembler(cfg),
 		engine:    engine,
 		mapper:    fsx.URLMapper{PrettyURLs: cfg.Build.PrettyURLs},
@@ -186,7 +218,15 @@ func (b *Builder) Build(ctx context.Context) (*Result, error) {
 		b.cleanTarget = target
 	}
 
-	pages, loadErr := b.loader.Load()
+	var pages []*content.Page
+	var loadErr error
+	for _, loader := range b.loaders {
+		loaded, err := loader.Load()
+		pages = append(pages, loaded...)
+		if err != nil {
+			loadErr = errors.Join(loadErr, err)
+		}
+	}
 
 	s, err := b.assembler.Assemble(pages, b.now)
 	if err != nil {
@@ -500,28 +540,35 @@ func (b *Builder) writeGenerated(w *publish.Writer, s *site.Site, res *Result) {
 		res.Bytes += int64(len(data))
 	}
 
-	if b.cfg.Feeds.RSS {
-		data, err := generate.RSS(s)
-		if err != nil {
-			res.Warnings = append(res.Warnings, err.Error())
-		} else {
-			write(generate.FeedPath, data)
+	for _, locale := range b.cfg.Locales {
+		prefix := strings.Trim(locale.URLPrefix, "/")
+		dir := prefix
+		if dir != "" {
+			dir += "/"
 		}
-	}
-	if b.cfg.Feeds.Sitemap {
-		data, err := generate.Sitemap(s)
-		if err != nil {
-			res.Warnings = append(res.Warnings, err.Error())
-		} else {
-			write(generate.SitemapPath, data)
+		if b.cfg.Feeds.RSS {
+			data, err := generate.RSSForLocale(s, locale.Code)
+			if err != nil {
+				res.Warnings = append(res.Warnings, err.Error())
+			} else {
+				write(dir+generate.FeedPath, data)
+			}
 		}
-	}
-	if b.cfg.Feeds.Search {
-		data, err := generate.Search(s, 400)
-		if err != nil {
-			res.Warnings = append(res.Warnings, err.Error())
-		} else {
-			write(generate.SearchPath, data)
+		if b.cfg.Feeds.Sitemap {
+			data, err := generate.SitemapForLocale(s, locale.Code)
+			if err != nil {
+				res.Warnings = append(res.Warnings, err.Error())
+			} else {
+				write(dir+generate.SitemapPath, data)
+			}
+		}
+		if b.cfg.Feeds.Search {
+			data, err := generate.SearchForLocale(s, locale.Code, 400)
+			if err != nil {
+				res.Warnings = append(res.Warnings, err.Error())
+			} else {
+				write(dir+generate.SearchPath, data)
+			}
 		}
 	}
 }

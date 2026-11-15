@@ -25,6 +25,9 @@ type Site struct {
 	RegularPages []*content.Page
 	// Home is the root page; always non-nil, synthesised when absent.
 	Home *content.Page
+	// Homes contains one home page per configured locale. Home is the default
+	// locale's home for backwards compatibility.
+	Homes map[string]*content.Page
 
 	Sections []*Section
 	Taxonomy TaxonomyIndex
@@ -40,7 +43,8 @@ type Site struct {
 // Section is one top-level content directory.
 type Section struct {
 	// Name is the directory name, e.g. "blog".
-	Name string
+	Name   string
+	Locale string
 	// Title is the human-readable section title.
 	Title string
 	URL   string
@@ -54,7 +58,8 @@ type Section struct {
 // Term is one taxonomy value and the pages carrying it.
 type Term struct {
 	// Name is the term as written in frontmatter.
-	Name string
+	Name   string
+	Locale string
 	// Slug is the URL-safe form.
 	Slug string
 	URL  string
@@ -83,6 +88,14 @@ type YearGroup struct {
 
 // NavEntry is one navigation item, marked active relative to a given page.
 type NavEntry struct {
+	Name   string
+	URL    string
+	Active bool
+}
+
+// LanguageLink is a translation switcher entry for the current page.
+type LanguageLink struct {
+	Code   string
 	Name   string
 	URL    string
 	Active bool
@@ -140,6 +153,27 @@ func (s *Site) Nav(current *content.Page) []NavEntry {
 			URL:    item.URL,
 			Active: isActive(item.URL, current),
 		})
+	}
+
+	return out
+}
+
+// LanguagesFor returns links to the translations of current.
+func (s *Site) LanguagesFor(current *content.Page) []LanguageLink {
+	if current == nil || len(s.Config.Locales) <= 1 {
+		return nil
+	}
+	byLocale := map[string]*content.Page{current.Locale: current}
+	for _, p := range current.Translations {
+		byLocale[p.Locale] = p
+	}
+	out := make([]LanguageLink, 0, len(s.Config.Locales))
+	for _, locale := range s.Config.Locales {
+		p := byLocale[locale.Code]
+		if p == nil {
+			continue
+		}
+		out = append(out, LanguageLink{Code: locale.Code, Name: locale.Name, URL: p.URL, Active: p == current})
 	}
 	return out
 }

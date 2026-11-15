@@ -69,6 +69,9 @@ type PageData struct {
 	Site       *site.Site
 	Page       *content.Page
 	Nav        []site.NavEntry
+	Languages  []site.LanguageLink
+	SearchURL  string
+	FeedURL    string
 	LiveReload bool
 	// DocumentTitle is the full <title>, already suffixed with the site name.
 	DocumentTitle string
@@ -350,9 +353,13 @@ func (e *Engine) RenderPage(p *content.Page, s *site.Site) ([]byte, error) {
 		Site:          s,
 		Page:          p,
 		Nav:           s.Nav(p),
+		Languages:     s.LanguagesFor(p),
+		SearchURL:     searchURL(e.cfg, p),
+		FeedURL:       feedURL(e.cfg, p),
 		LiveReload:    e.liveReload,
 		DocumentTitle: documentTitle(p, e.cfg),
 	}
+
 	data.assetURL = func(asset string) string {
 		return e.AssetURL(asset)
 	}
@@ -362,6 +369,27 @@ func (e *Engine) RenderPage(p *content.Page, s *site.Site) ([]byte, error) {
 		return nil, fmt.Errorf("render %s with %s: %w", p.URL, name, err)
 	}
 	return buf.Bytes(), nil
+}
+
+func searchURL(cfg *config.Site, p *content.Page) string {
+	for _, locale := range cfg.Locales {
+		if locale.Code == p.Locale {
+			if locale.URLPrefix == "" {
+				return "/search.json"
+			}
+			return "/" + strings.Trim(locale.URLPrefix, "/") + "/search.json"
+		}
+	}
+	return "/search.json"
+}
+
+func feedURL(cfg *config.Site, p *content.Page) string {
+	for _, locale := range cfg.Locales {
+		if locale.Code == p.Locale && locale.URLPrefix != "" {
+			return "/" + strings.Trim(locale.URLPrefix, "/") + "/feed.xml"
+		}
+	}
+	return "/feed.xml"
 }
 
 // AssetURL resolves a theme asset path to a versioned, site-relative URL.

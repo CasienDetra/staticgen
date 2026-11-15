@@ -25,6 +25,9 @@ type LoadOptions struct {
 	SummaryWords int
 	BaseURL      string
 	Now          time.Time
+	Locale       string
+	URLPrefix    string
+	ExcludeDirs  []string
 }
 
 // Loader discovers and renders Markdown files into Pages.
@@ -68,6 +71,12 @@ func (l *Loader) Load() ([]*Page, error) {
 	)
 
 	walkErr := fsx.Walk(l.root, func(f fsx.SourceFile) error {
+		for _, excluded := range l.opts.ExcludeDirs {
+			excluded = strings.Trim(strings.ReplaceAll(excluded, "\\", "/"), "/")
+			if excluded != "" && (f.RelPath == excluded || strings.HasPrefix(f.RelPath, excluded+"/")) {
+				return nil
+			}
+		}
 		if !fsx.IsContent(f.RelPath) || fsx.ShouldSkip(f.RelPath) {
 			return nil
 		}
@@ -129,6 +138,13 @@ func (l *Loader) loadFile(f fsx.SourceFile, now time.Time) (*Page, error) {
 	}
 
 	url := l.mapper.URLPath(f.RelPath, meta.Slug)
+	if l.opts.URLPrefix != "" {
+		url = "/" + strings.Trim(l.opts.URLPrefix, "/") + url
+	}
+	locale := l.opts.Locale
+	if meta.Language != "" {
+		locale = meta.Language
+	}
 	if meta.Title == "" {
 		meta.Title = deriveTitle(res.Headings, url)
 	}
@@ -138,6 +154,8 @@ func (l *Loader) loadFile(f fsx.SourceFile, now time.Time) (*Page, error) {
 		URL:            url,
 		OutputPath:     l.mapper.OutputPath(url),
 		Permalink:      l.permalink(url),
+		Locale:         locale,
+		TranslationKey: meta.TranslationKey,
 		Meta:           meta,
 		Section:        fsx.Section(f.RelPath),
 		IsIndex:        fsx.IsSectionIndex(f.RelPath),

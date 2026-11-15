@@ -49,6 +49,12 @@ type Page struct {
 	OutputPath string
 	// Permalink is absolute (BaseURL + URL), empty when no base_url is set.
 	Permalink string
+	// Locale is the language code for this page.
+	Locale string
+	// TranslationKey groups equivalent pages across locales.
+	TranslationKey string
+	// Translations contains the other locale variants of this page.
+	Translations []*Page
 
 	Meta Meta
 	// Section is the top-level content directory; "" for root-level pages.

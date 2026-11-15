@@ -18,21 +18,23 @@ import (
 // site-specific values without this package having to know about them. It works
 // because yaml.v3 supports an inline map.
 type Meta struct {
-	Title       string    `yaml:"title"`
-	Description string    `yaml:"description"`
-	Summary     string    `yaml:"summary"`
-	Slug        string    `yaml:"slug"`
-	Layout      string    `yaml:"layout"`
-	Date        time.Time `yaml:"date"`
-	LastMod     time.Time `yaml:"lastmod"`
-	Expires     time.Time `yaml:"expires"`
-	Draft       bool      `yaml:"draft"`
-	Featured    bool      `yaml:"featured"`
-	Weight      int       `yaml:"weight"`
-	Tags        []string  `yaml:"tags"`
-	Categories  []string  `yaml:"categories"`
-	Aliases     []string  `yaml:"aliases"`
-	Redirect    string    `yaml:"redirect"`
+	Title          string    `yaml:"title"`
+	Language       string    `yaml:"language"`
+	TranslationKey string    `yaml:"translation_key"`
+	Description    string    `yaml:"description"`
+	Summary        string    `yaml:"summary"`
+	Slug           string    `yaml:"slug"`
+	Layout         string    `yaml:"layout"`
+	Date           time.Time `yaml:"date"`
+	LastMod        time.Time `yaml:"lastmod"`
+	Expires        time.Time `yaml:"expires"`
+	Draft          bool      `yaml:"draft"`
+	Featured       bool      `yaml:"featured"`
+	Weight         int       `yaml:"weight"`
+	Tags           []string  `yaml:"tags"`
+	Categories     []string  `yaml:"categories"`
+	Aliases        []string  `yaml:"aliases"`
+	Redirect       string    `yaml:"redirect"`
 	// TOC opts a single page in or out of a table of contents; nil means
 	// "use the site default".
 	TOC   *bool          `yaml:"toc"`
@@ -114,6 +116,8 @@ func ParseMeta(front []byte) (Meta, error) {
 // normalize tidies values so callers can trust them.
 func (m *Meta) normalize() {
 	m.Title = strings.TrimSpace(m.Title)
+	m.Language = strings.TrimSpace(m.Language)
+	m.TranslationKey = strings.TrimSpace(m.TranslationKey)
 	m.Description = strings.TrimSpace(m.Description)
 	m.Summary = strings.TrimSpace(m.Summary)
 	m.Slug = strings.TrimSpace(m.Slug)

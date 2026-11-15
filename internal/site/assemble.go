@@ -37,12 +37,16 @@ func (a *Assembler) Assemble(loaded []*content.Page, now time.Time) (*Site, erro
 
 	filePages := append([]*content.Page(nil), loaded...)
 	s := &Site{Config: a.cfg, BuiltAt: now}
+	s.Homes = map[string]*content.Page{}
 
 	s.Sections = a.buildSections(filePages)
 	sectionPages := a.synthesizeSectionIndexes(s.Sections, now)
 
 	home, homeSynthetic := a.resolveHome(filePages, s.Sections, now)
 	s.Home = home
+	if home != nil {
+		s.Homes[home.Locale] = home
+	}
 
 	taxonomy, taxPages := a.buildTaxonomies(filePages, now)
 	s.Taxonomy = taxonomy
@@ -81,7 +85,20 @@ func (a *Assembler) Assemble(loaded []*content.Page, now time.Time) (*Site, erro
 	})
 	s.Pages = all
 	s.Stats = computeStats(s)
+	a.groupTranslations(s.Pages)
 	return s, nil
+}
+
+func (a *Assembler) prefixFor(locale string) string {
+	for _, l := range a.cfg.Locales {
+		if l.Code == locale {
+			if l.URLPrefix == "" {
+				return ""
+			}
+			return "/" + strings.Trim(l.URLPrefix, "/")
+		}
+	}
+	return ""
 }
 
 // dirURL builds a URL for a generated directory page.
@@ -130,15 +147,17 @@ func (a *Assembler) buildSections(pages []*content.Page) []*Section {
 		if p.Section == "" {
 			continue
 		}
-		sec, ok := byName[p.Section]
+		key := p.Locale + "\x00" + p.Section
+		sec, ok := byName[key]
 		if !ok {
 			sec = &Section{
-				Name:  p.Section,
-				Title: humanize(p.Section),
-				URL:   a.dirURL(p.Section),
+				Name:   p.Section,
+				Locale: p.Locale,
+				Title:  humanize(p.Section),
+				URL:    a.prefixFor(p.Locale) + a.dirURL(p.Section),
 			}
-			byName[p.Section] = sec
-			order = append(order, p.Section)
+			byName[key] = sec
+			order = append(order, key)
 		}
 		if p.IsIndex {
 			sec.Index = p
@@ -148,7 +167,7 @@ func (a *Assembler) buildSections(pages []*content.Page) []*Section {
 	out := make([]*Section, 0, len(order))
 	for _, name := range order {
 		sec := byName[name]
-		sec.Pages = regularInSection(pages, name)
+		sec.Pages = regularInSection(pages, sec.Locale, sec.Name)
 		if sec.Index != nil {
 			// Section landing pages list their own members.
 			sec.Index.Pages = sec.Pages
@@ -160,7 +179,12 @@ func (a *Assembler) buildSections(pages []*content.Page) []*Section {
 		out = append(out, sec)
 	}
 
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Locale != out[j].Locale {
+			return out[i].Locale < out[j].Locale
+		}
+		return out[i].Name < out[j].Name
+	})
 	return out
 }
 
@@ -226,13 +250,13 @@ func (a *Assembler) buildOneTaxonomy(slug, title string, pages []*content.Page, 
 
 	for _, p := range pages {
 		for _, raw := range pick(p) {
-			key := fsx.Slugify(raw)
+			key := p.Locale + "\x00" + fsx.Slugify(raw)
 			if key == "" {
 				continue
 			}
 			t, ok := groups[key]
 			if !ok {
-				t = &Term{Name: raw, Slug: key}
+				t = &Term{Name: raw, Slug: fsx.Slugify(raw), Locale: p.Locale}
 				groups[key] = t
 			}
 			t.Pages = append(t.Pages, p)
@@ -254,15 +278,19 @@ func (a *Assembler) buildOneTaxonomy(slug, title string, pages []*content.Page, 
 	var synthetic []*content.Page
 	for _, t := range terms {
 		t.Pages = regularSorted(t.Pages)
-		t.URL = a.dirURL(slug, t.Slug)
+		t.URL = a.prefixFor(t.Locale) + a.dirURL(slug, t.Slug)
 		t.Page = a.listingPage(content.KindTerm, t.Name, t.URL, t.Name, t.Pages, now)
 		synthetic = append(synthetic, t.Page)
 	}
 
 	// The taxonomy index page carries no Pages of its own; templates read the
 	// term list from Site.Taxonomy instead.
-	indexURL := a.dirURL(slug)
-	synthetic = append(synthetic, a.listingPage(content.KindTaxonomy, title, indexURL, "", nil, now))
+	for _, locale := range a.cfg.Locales {
+		indexURL := a.prefixFor(locale.Code) + a.dirURL(slug)
+		p := a.listingPage(content.KindTaxonomy, title, indexURL, "", nil, now)
+		p.Locale = locale.Code
+		synthetic = append(synthetic, p)
+	}
 
 	return terms, synthetic
 }
@@ -289,8 +317,13 @@ func (a *Assembler) buildArchive(pages []*content.Page, now time.Time) ([]*YearG
 		groups = append(groups, &YearGroup{Year: y, Pages: regularSorted(byYear[y])})
 	}
 
-	page := a.listingPage(content.KindArchive, "Archive", a.dirURL("archive"), "", nil, now)
-	return groups, []*content.Page{page}
+	var pagesOut []*content.Page
+	for _, locale := range a.cfg.Locales {
+		page := a.listingPage(content.KindArchive, "Archive", a.prefixFor(locale.Code)+a.dirURL("archive"), "", nil, now)
+		page.Locale = locale.Code
+		pagesOut = append(pagesOut, page)
+	}
+	return groups, pagesOut
 }
 
 // buildMenu returns the configured menu, or one derived from the site's
@@ -299,11 +332,31 @@ func (a *Assembler) buildMenu(s *Site) []config.MenuItem {
 	if len(a.cfg.Menu) > 0 {
 		return a.cfg.Menu
 	}
+
 	menu := []config.MenuItem{{Name: "Home", URL: "/", Weight: -100}}
 	for _, sec := range s.Sections {
 		menu = append(menu, config.MenuItem{Name: sec.Title, URL: sec.URL, Weight: 0})
 	}
+
 	return menu
+}
+
+func (a *Assembler) groupTranslations(pages []*content.Page) {
+	groups := map[string][]*content.Page{}
+	for _, p := range pages {
+		if p.TranslationKey != "" {
+			groups[p.TranslationKey] = append(groups[p.TranslationKey], p)
+		}
+	}
+	for _, members := range groups {
+		for _, p := range members {
+			for _, other := range members {
+				if other != p && other.Locale != p.Locale {
+					p.Translations = append(p.Translations, other)
+				}
+			}
+		}
+	}
 }
 
 // linkPrevNext connects each regular page to its chronological neighbours
@@ -339,10 +392,10 @@ func regularPages(pages []*content.Page) []*content.Page {
 	return regularSorted(out)
 }
 
-func regularInSection(pages []*content.Page, section string) []*content.Page {
+func regularInSection(pages []*content.Page, locale, section string) []*content.Page {
 	out := make([]*content.Page, 0)
 	for _, p := range pages {
-		if p.Kind == content.KindPage && !p.NoIndex && p.Section == section {
+		if p.Kind == content.KindPage && !p.NoIndex && p.Locale == locale && p.Section == section {
 			out = append(out, p)
 		}
 	}

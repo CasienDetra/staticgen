@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="{{ .Config.Language }}">
+<html lang="{{ if .Page.Locale }}{{ .Page.Locale }}{{ else }}{{ .Config.Language }}{{ end }}">
 <head>
 {{ template "partials/head.html" . }}
 </head>

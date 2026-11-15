@@ -71,6 +71,16 @@ type rssItem struct {
 // It returns an error when no base_url is configured: RSS requires absolute
 // URLs, and emitting relative ones would produce a feed every reader rejects.
 func RSS(s *site.Site) ([]byte, error) {
+	return rssFor(s, "")
+}
+
+// RSSForLocale renders a feed containing only one locale's pages.
+func RSSForLocale(s *site.Site, locale string) ([]byte, error) {
+	return rssFor(s, locale)
+}
+
+func rssFor(s *site.Site, locale string) ([]byte, error) {
+	s = localized(s, locale)
 	cfg := s.Config
 	if cfg.BaseURL == "" {
 		return nil, errNoBaseURL("RSS feed")
@@ -127,17 +137,35 @@ func RSS(s *site.Site) ([]byte, error) {
 type urlset struct {
 	XMLName xml.Name     `xml:"urlset"`
 	XMLNS   string       `xml:"xmlns,attr"`
+	XHTMLNS string       `xml:"xmlns:xhtml,attr"`
 	URLs    []sitemapURL `xml:"url"`
 }
 
 type sitemapURL struct {
-	Loc        string `xml:"loc"`
-	LastMod    string `xml:"lastmod,omitempty"`
-	Changefreq string `xml:"changefreq,omitempty"`
+	Loc        string         `xml:"loc"`
+	LastMod    string         `xml:"lastmod,omitempty"`
+	Changefreq string         `xml:"changefreq,omitempty"`
+	Alternates []alternateURL `xml:"xhtml:link,omitempty"`
+}
+
+type alternateURL struct {
+	Rel      string `xml:"rel,attr"`
+	Hreflang string `xml:"hreflang,attr"`
+	Href     string `xml:"href,attr"`
 }
 
 // Sitemap renders an XML sitemap covering every page in the build.
 func Sitemap(s *site.Site) ([]byte, error) {
+	return sitemapFor(s, "")
+}
+
+// SitemapForLocale renders a sitemap containing only one locale's pages.
+func SitemapForLocale(s *site.Site, locale string) ([]byte, error) {
+	return sitemapFor(s, locale)
+}
+
+func sitemapFor(s *site.Site, locale string) ([]byte, error) {
+	s = localized(s, locale)
 	cfg := s.Config
 	if cfg.BaseURL == "" {
 		return nil, errNoBaseURL("sitemap")
@@ -154,6 +182,11 @@ func Sitemap(s *site.Site) ([]byte, error) {
 			Loc:        cfg.AbsURL(p.URL),
 			Changefreq: changeFreq(p),
 		}
+		for _, other := range p.Translations {
+			entry.Alternates = append(entry.Alternates, alternateURL{
+				Rel: "alternate", Hreflang: other.Locale, Href: cfg.AbsURL(other.URL),
+			})
+		}
 		if t := p.LastMod(); !t.IsZero() {
 			entry.LastMod = t.UTC().Format("2006-01-02")
 		}
@@ -161,8 +194,9 @@ func Sitemap(s *site.Site) ([]byte, error) {
 	}
 
 	return marshalXML(urlset{
-		XMLNS: "http://www.sitemaps.org/schemas/sitemap/0.9",
-		URLs:  urls,
+		XMLNS:   "http://www.sitemaps.org/schemas/sitemap/0.9",
+		XHTMLNS: "http://www.w3.org/1999/xhtml",
+		URLs:    urls,
 	})
 }
 
@@ -201,6 +235,16 @@ type SearchIndex struct {
 // it is to use. Unlike the feed and sitemap, search works without a base_url
 // because the theme fetches it by site-relative path.
 func Search(s *site.Site, bodyLimit int) ([]byte, error) {
+	return searchFor(s, "", bodyLimit)
+}
+
+// SearchForLocale renders a search index containing only one locale's pages.
+func SearchForLocale(s *site.Site, locale string, bodyLimit int) ([]byte, error) {
+	return searchFor(s, locale, bodyLimit)
+}
+
+func searchFor(s *site.Site, locale string, bodyLimit int) ([]byte, error) {
+	s = localized(s, locale)
 	if bodyLimit <= 0 {
 		bodyLimit = 400
 	}
@@ -229,6 +273,36 @@ func Search(s *site.Site, bodyLimit int) ([]byte, error) {
 		Documents: docs,
 	}
 	return marshalJSON(idx)
+}
+
+func localized(in *site.Site, locale string) *site.Site {
+	if locale == "" {
+		return in
+	}
+	out := *in
+	out.Pages = filterLocale(in.Pages, locale, in.Config.Language)
+	out.RegularPages = filterLocale(in.RegularPages, locale, in.Config.Language)
+	if in.Home != nil && pageLocale(in.Home) == locale {
+		out.Home = in.Home
+	}
+	return &out
+}
+
+func filterLocale(pages []*content.Page, locale, defaultLocale string) []*content.Page {
+	out := make([]*content.Page, 0, len(pages))
+	for _, p := range pages {
+		if pageLocale(p) == locale || (p.Locale == "" && locale == defaultLocale) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func pageLocale(p *content.Page) string {
+	if p.Locale != "" {
+		return p.Locale
+	}
+	return "en-us"
 }
 
 // clip truncates to n runes on a word boundary.

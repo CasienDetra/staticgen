@@ -5,7 +5,10 @@
 {{ with .Page.Meta.Description }}<meta name="description" content="{{ . }}">
 {{ end }}{{ with .Config.Author.Name }}<meta name="author" content="{{ . }}">
 {{ end }}<link rel="canonical" href="{{ absURL .Page.URL }}">
-{{ if .Config.Feeds.RSS }}<link rel="alternate" type="application/rss+xml" title="{{ .Config.Title }}" href="{{ absURL "/feed.xml" }}">
+{{ range .Languages }}<link rel="alternate" hreflang="{{ .Code }}" href="{{ absURL .URL }}">
+{{ end }}{{ if .Languages }}<link rel="alternate" hreflang="x-default" href="{{ absURL $.Page.URL }}">
+{{ end }}
+{{ if .Config.Feeds.RSS }}<link rel="alternate" type="application/rss+xml" title="{{ .Config.Title }}" href="{{ absURL .FeedURL }}">
 {{ end }}<link rel="stylesheet" href="{{ asset "css/style.css" }}">
 {{ if .Config.Markup.Highlight.Enabled }}<link rel="stylesheet" href="{{ asset "css/chroma.css" }}">
 {{ end }}<meta property="og:site_name" content="{{ .Config.Title }}">

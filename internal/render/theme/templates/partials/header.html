@@ -6,10 +6,13 @@
       {{ range .Nav }}<a href="{{ .URL }}"{{ if .Active }} class="active" aria-current="page"{{ end }}>{{ .Name }}</a>
       {{ end }}
     </nav>
+    {{ if .Languages }}<nav class="language-switcher" aria-label="Language">
+      {{ range .Languages }}<a href="{{ .URL }}"{{ if .Active }} aria-current="page"{{ end }}>{{ .Name }}</a>{{ end }}
+    </nav>{{ end }}
 
     {{ if .Config.Feeds.Search }}<div class="site-search">
       <input type="search" id="site-search-input" placeholder="Search…" autocomplete="off"
-             aria-label="Search this site" data-index="{{ relURL "/search.json" }}">
+             aria-label="Search this site" data-index="{{ relURL .SearchURL }}">
       <div class="search-results" id="site-search-results" hidden></div>
     </div>
     <script src="{{ asset "js/search.js" }}" defer></script>

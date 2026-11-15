@@ -69,7 +69,7 @@ draft: false
 Body text in Markdown.
 ```
 
-Recognised frontmatter keys: `title`, `description`, `summary`, `slug`,
+Recognised frontmatter keys: `title`, `language`, `translation_key`, `description`, `summary`, `slug`,
 `layout`, `date`, `lastmod`, `expires`, `draft`, `featured`, `weight`,
 `tags`, `categories`, `aliases`, `redirect`, `toc`. Any other key is passed
 through to templates untouched.
@@ -87,6 +87,12 @@ through to templates untouched.
 title: Field Notes
 base_url: https://example.com   # required for RSS and the sitemap
 language: en-us
+locales:
+  - code: en-us
+    name: English
+  - code: fr
+    name: Français
+    content: content/fr
 
 author:
   name: Casien
@@ -132,6 +138,13 @@ menu:
     url: /blog/
     weight: 2
 ```
+
+When `locales` contains more than one entry, the default language keeps the
+existing URLs and additional locales use their `url_prefix` (the locale code
+by default). Content may be placed under each locale's `content` directory.
+Pages with the same `translation_key` expose language-switcher links and
+`hreflang` metadata. Each locale also receives its own `feed.xml`,
+`sitemap.xml`, and `search.json`.
 
 ### Listing pagination
 

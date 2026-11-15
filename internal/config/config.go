@@ -25,12 +25,13 @@ var configFileNames = []string{"site.yaml", "site.yml", "config.yaml", "staticge
 
 // Site is the fully resolved configuration for one build.
 type Site struct {
-	Title       string `yaml:"title"`
-	Description string `yaml:"description"`
-	BaseURL     string `yaml:"base_url"`
-	Language    string `yaml:"language"`
-	Copyright   string `yaml:"copyright"`
-	Author      Author `yaml:"author"`
+	Title       string   `yaml:"title"`
+	Description string   `yaml:"description"`
+	BaseURL     string   `yaml:"base_url"`
+	Language    string   `yaml:"language"`
+	Locales     []Locale `yaml:"locales"`
+	Copyright   string   `yaml:"copyright"`
+	Author      Author   `yaml:"author"`
 
 	Dirs Dirs `yaml:"dirs"`
 
@@ -54,6 +55,14 @@ type Site struct {
 	// missing, so the intent has to be captured before that happens.
 	rssWanted     bool `yaml:"-"`
 	sitemapWanted bool `yaml:"-"`
+}
+
+// Locale describes one published language variant.
+type Locale struct {
+	Code      string `yaml:"code"`
+	Name      string `yaml:"name"`
+	URLPrefix string `yaml:"url_prefix"`
+	Content   string `yaml:"content"`
 }
 
 // Author describes the site or feed author.
@@ -149,6 +158,7 @@ func Default() *Site {
 	return &Site{
 		Title:    "My Site",
 		Language: "en-us",
+		Locales:  []Locale{{Code: "en-us", Name: "en-us"}},
 		Dirs: Dirs{
 			Content:   "content",
 			Static:    "static",
@@ -326,6 +336,7 @@ func (s *Site) normalize() {
 	if s.Language == "" {
 		s.Language = "en-us"
 	}
+	s.normalizeLocales()
 	s.BaseURL = strings.TrimRight(strings.TrimSpace(s.BaseURL), "/")
 
 	for dir, def := range map[*string]string{
@@ -338,12 +349,14 @@ func (s *Site) normalize() {
 		if *dir == "" {
 			*dir = def
 		}
+
 		*dir = filepath.Clean(*dir)
 	}
 
 	if s.Build.SummaryLength <= 0 {
 		s.Build.SummaryLength = 70
 	}
+
 	if s.Build.Paginate < 0 {
 		s.Build.Paginate = 0
 	}
@@ -391,6 +404,53 @@ func (s *Site) normalize() {
 		}
 	}
 	sortMenu(s.Menu)
+}
+
+func (s *Site) normalizeLocales() {
+	if len(s.Locales) == 1 && s.Locales[0].Code == "en-us" && s.Language != "en-us" {
+		s.Locales = []Locale{{Code: s.Language, Name: s.Language}}
+		return
+	}
+	if len(s.Locales) == 0 {
+		s.Locales = []Locale{{Code: s.Language, Name: s.Language}}
+		return
+	}
+	seen := map[string]bool{}
+	out := make([]Locale, 0, len(s.Locales))
+	for _, locale := range s.Locales {
+		locale.Code = strings.TrimSpace(locale.Code)
+		if locale.Code == "" || seen[locale.Code] {
+			continue
+		}
+		seen[locale.Code] = true
+		locale.Name = strings.TrimSpace(locale.Name)
+		if locale.Name == "" {
+			locale.Name = locale.Code
+		}
+		locale.URLPrefix = strings.Trim(locale.URLPrefix, "/")
+		if locale.URLPrefix == "" && locale.Code != s.Language {
+			locale.URLPrefix = locale.Code
+		}
+		locale.Content = filepath.Clean(strings.TrimSpace(locale.Content))
+		if locale.Content == "." {
+			locale.Content = ""
+		}
+		out = append(out, locale)
+	}
+	if len(out) == 0 {
+		out = append(out, Locale{Code: s.Language, Name: s.Language})
+	}
+	foundDefault := false
+	for _, locale := range out {
+		if locale.Code == s.Language {
+			foundDefault = true
+			break
+		}
+	}
+	if !foundDefault {
+		out = append([]Locale{{Code: s.Language, Name: s.Language}}, out...)
+	}
+	s.Locales = out
 }
 
 // Validate reports configuration that cannot produce a correct build.
@@ -464,6 +524,19 @@ func isAbsoluteURL(s string) bool {
 
 // ContentPath returns the absolute content directory.
 func (s *Site) ContentPath() string { return resolveDir(s.Root, s.Dirs.Content) }
+
+// LocaleContentPath returns the content root for a configured locale. The
+// default locale keeps the legacy content root unless an explicit locale root
+// exists, so existing sites do not need to move their files.
+func (s *Site) LocaleContentPath(locale Locale) string {
+	if locale.Content != "" {
+		return resolveDir(s.Root, locale.Content)
+	}
+	if locale.Code == s.Language {
+		return s.ContentPath()
+	}
+	return filepath.Join(s.ContentPath(), locale.Code)
+}
 
 // StaticPath returns the absolute static asset directory.
 func (s *Site) StaticPath() string { return resolveDir(s.Root, s.Dirs.Static) }
