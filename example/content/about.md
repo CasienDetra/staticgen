@@ -2,6 +2,7 @@
 title: About
 description: Who writes this and why.
 date: 2026-01-04T09:00:00Z
+translation_key: about
 ---
 
 This is a standalone page: it lives at the root of `content/` rather than inside a

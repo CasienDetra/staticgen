@@ -1,6 +1,7 @@
 ---
 title: Field Notes
 description: Notes on Go, tooling, and building small static sites.
+translation_key: home
 ---
 
 Welcome. This site is built from a directory of Markdown files by `staticgen`.

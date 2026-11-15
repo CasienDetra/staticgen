@@ -2,6 +2,7 @@
 title: Getting started with staticgen
 description: How a directory of Markdown becomes a website, and what to configure first.
 date: 2026-01-15T10:30:00Z
+translation_key: getting-started
 tags: [staticgen, tooling, getting-started]
 categories: [guides]
 aliases: [/posts/getting-started/, /intro/]

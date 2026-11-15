@@ -2,6 +2,12 @@ title: Field Notes
 description: A small blog about Go, tooling and building static sites.
 base_url: https://example.com
 language: en-us
+locales:
+  - code: en-us
+    name: English
+  - code: km
+    name: ខ្មែរ
+    content: content/km
 copyright: "Released under the MIT licence."
 
 author:
