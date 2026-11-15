@@ -405,6 +405,7 @@ func TestClip(t *testing.T) {
 		{"exactly the limit", "a b c", 5, "a b c"},
 		{"normalises whitespace", "a\n\n  b   c", 50, "a b c"},
 		{"empty", "   ", 10, ""},
+		{"unicode word boundary", "សួស្តី ពិភពលោក នេះជាអត្ថបទ", 15, "សួស្តី ពិភពលោក…"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

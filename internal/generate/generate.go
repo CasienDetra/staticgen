@@ -312,12 +312,12 @@ func clip(s string, n int) string {
 	if len(r) <= n {
 		return s
 	}
-	cut := r[:n]
+	cut := string(r[:n])
 	// Back off to the last space so the excerpt does not end mid-word.
-	if i := strings.LastIndex(string(cut), " "); i > n/2 {
+	if i := strings.LastIndex(cut, " "); i > n/2 {
 		cut = cut[:i]
 	}
-	return strings.TrimSpace(string(cut)) + "…"
+	return strings.TrimSpace(cut) + "…"
 }
 
 func plainSummary(p *content.Page) string {
