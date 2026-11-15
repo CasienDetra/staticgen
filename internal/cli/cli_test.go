@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 // runCLI executes the root command with args and returns everything it
@@ -197,14 +196,18 @@ func TestNewPostCommand(t *testing.T) {
 		t.Errorf("--force should overwrite: %v", err)
 	}
 
-	// --published drops the draft marker. The scaffold names the file after
-	// today's date, so compute it rather than pinning a literal that would
-	// break tomorrow.
+	// --published drops the draft marker. The scaffold prefixes the filename
+	// with the current date, so find it by pattern instead of computing the
+	// date: a literal breaks tomorrow, and time.Now() can disagree with the
+	// command at a midnight boundary or across time zones.
 	if _, err := runCLI(t, "new", "post", "Live Post", "-s", root, "--published"); err != nil {
 		t.Fatal(err)
 	}
-	today := time.Now().UTC().Format("2006-01-02")
-	live, err := os.ReadFile(filepath.Join(root, "content", today+"-live-post.md"))
+	scaffolded, err := filepath.Glob(filepath.Join(root, "content", "*-live-post.md"))
+	if err != nil || len(scaffolded) != 1 {
+		t.Fatalf("expected exactly one scaffolded post, got %v (err %v)", scaffolded, err)
+	}
+	live, err := os.ReadFile(scaffolded[0])
 	if err != nil {
 		t.Fatal(err)
 	}
